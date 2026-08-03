@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320,height=440">
+<title>CLAUDE.PET</title>
+<style>
+:root{
+  --bg1:#04060d; --bg2:#0a0f1c;
+  --cy:#00f0ff; --gr:#39ff14; --mg:#ff00e5; --am:#ffb000;
+  --rd:#ff3b3b; --dim:#5f7290; --txt:#cfe9ff; --st:#00f0ff;
+}
+*{box-sizing:border-box;margin:0;padding:0;user-select:none;-webkit-user-select:none}
+html,body{width:100%;height:100%;overflow:hidden;background:#04060d;
+  font-family:'Cascadia Code','Cascadia Mono',Consolas,'Microsoft YaHei',monospace;
+  color:var(--txt)}
+#shell{width:320px;height:100%;min-height:430px;position:relative;display:flex;flex-direction:column;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(0,240,255,.10), transparent 55%),
+    radial-gradient(90% 60% at 80% 100%, rgba(255,0,229,.07), transparent 60%),
+    linear-gradient(160deg,var(--bg1),var(--bg2));
+  border:1px solid rgba(0,240,255,.35);
+  box-shadow:0 0 18px rgba(0,240,255,.18), inset 0 0 34px rgba(0,240,255,.06);
+  padding:7px 10px 9px}
+/* scanlines */
+#shell::after{content:'';position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(0deg,rgba(255,255,255,.03) 0 1px,transparent 1px 3px);
+  mix-blend-mode:overlay}
+/* corner brackets */
+.corner{position:absolute;width:11px;height:11px;border:1px solid var(--st);
+  opacity:.8;pointer-events:none;filter:drop-shadow(0 0 4px var(--st))}
+.corner.tl{top:3px;left:3px;border-right:none;border-bottom:none}
+.corner.tr{top:3px;right:3px;border-left:none;border-bottom:none}
+.corner.bl{bottom:3px;left:3px;border-right:none;border-top:none}
+.corner.br{bottom:3px;right:3px;border-left:none;border-top:none}
+
+/* header */
+.header{display:flex;align-items:center;gap:6px;height:16px;flex:none}
+.led{width:8px;height:8px;border-radius:50%;background:var(--st);flex:none;
+  box-shadow:0 0 8px var(--st);animation:blink 1.2s steps(1) infinite}
+@keyframes blink{50%{opacity:.25}}
+.title{font-size:10px;letter-spacing:2px;color:var(--dim);white-space:nowrap;overflow:hidden}
+.title b{color:var(--st);font-weight:600}
+.clock{margin-left:auto;font-size:10px;color:var(--dim);letter-spacing:1px}
+
+/* state line */
+.statebox{flex:none;margin-top:4px}
+.stateline{font-size:17px;font-weight:700;letter-spacing:3px;color:var(--st);
+  text-shadow:0 0 8px var(--st),0 0 22px var(--st);display:flex;align-items:baseline;gap:8px}
+.stateline .cn{font-size:9px;letter-spacing:1px;color:var(--dim);font-weight:400}
+.bar{flex:none;height:5px;margin-top:5px;position:relative;background:rgba(255,255,255,.05);
+  border:1px solid rgba(255,255,255,.08)}
+.bar i{position:absolute;inset:0;width:0%;background:linear-gradient(90deg,var(--st),transparent);
+  box-shadow:0 0 8px var(--st);transition:width .4s linear}
+.bar u{position:absolute;right:0;top:-1px;font-size:8px;color:var(--dim);
+  letter-spacing:1px;padding-right:1px}
+
+/* pet stage */
+.stage{flex:1;position:relative;display:flex;align-items:center;justify-content:center;min-height:0}
+.ring{position:absolute;width:268px;height:268px;border-radius:50%;
+  border:1px solid rgba(0,240,255,.16);
+  box-shadow:0 0 30px rgba(0,240,255,.10), inset 0 0 24px rgba(0,240,255,.05);
+  animation:spin 14s linear infinite;pointer-events:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ring::before{content:'';position:absolute;top:-2px;left:50%;width:8px;height:4px;
+  background:var(--st);box-shadow:0 0 8px var(--st);transform:translateX(-50%)}
+#pet{position:relative;width:252px;height:252px;object-fit:contain;cursor:pointer;
+  filter:drop-shadow(0 0 14px rgba(0,240,255,.22))}
+#pet.dim{opacity:.75}
+
+/* footer */
+.footer{flex:none;margin-top:6px}
+.meta{display:flex;justify-content:space-between;font-size:9px;color:var(--dim);
+  letter-spacing:1px;margin-bottom:6px}
+.meta b{color:var(--st);font-weight:400}
+.btns{display:flex;gap:5px}
+.btn{flex:1;font-family:inherit;font-size:9px;letter-spacing:1px;color:var(--txt);
+  background:rgba(0,240,255,.05);border:1px solid rgba(0,240,255,.28);padding:4px 0;
+  cursor:pointer;text-align:center;transition:all .15s}
+.btn:hover{background:rgba(0,240,255,.18);color:#fff;box-shadow:0 0 10px rgba(0,240,255,.4)}
+.btn.bad:hover{background:rgba(255,59,59,.2);border-color:var(--rd);box-shadow:0 0 10px rgba(255,59,59,.4)}
+#toast{position:absolute;left:50%;bottom:74px;transform:translateX(-50%);
+  font-size:9px;letter-spacing:2px;color:#000;background:var(--st);
+  padding:2px 8px;opacity:0;transition:opacity .2s;white-space:nowrap;pointer-events:none;
+  box-shadow:0 0 12px var(--st);z-index:5}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div id="shell">
+  <i class="corner tl"></i><i class="corner tr"></i>
+  <i class="corner bl"></i><i class="corner br"></i>
+
+  <div class="header">
+    <span class="led" id="led"></span>
+    <span class="title"><b>C:\&gt;</b> CLAUDE.PET // MON</span>
+    <span class="clock" id="clock">--:--:--</span>
+  </div>
+
+  <div class="statebox">
+    <div class="stateline"><span id="state">BOOT</span><span class="cn" id="statecn">初始化</span></div>
+    <div class="bar"><i id="fill"></i><u id="age">AGE --</u></div>
+  </div>
+
+  <div class="stage">
+    <div class="ring"></div>
+    <img id="pet" alt="pet" draggable="false">
+  </div>
+
+  <div class="footer">
+    <div class="meta">
+      <span>CLI <b id="cli">?</b></span>
+      <span>TERM <b id="term">?</b></span>
+      <span id="forcedTag"></span>
+    </div>
+    <div class="btns">
+      <button class="btn" id="bFocus">焦点</button>
+      <button class="btn" id="bTerm">收起</button>
+      <button class="btn" id="bDebug">调试</button>
+      <button class="btn bad" id="bExit">退出</button>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+</div>
+
+<script>
+window.__INIT__ = __INIT_PAYLOAD__;
+
+const GIFS = {
+  thinking: 'thinking.gif',
+  working: 'working.gif',
+  working_long: 'workinglong.gif',
+  done: 'done.gif',
+  idle: 'offlineandidle.gif',
+  offline: 'offlineandidle.gif',
+  error: 'errorandwaityou.gif',
+};
+const COLORS = {
+  thinking: '#00f0ff',
+  working: '#39ff14',
+  working_long: '#ffb000',
+  done: '#ff00e5',
+  idle: '#8fa8c8',
+  offline: '#ff3b3b',
+  error: '#ff2a2a',
+};
+const CN = {
+  thinking: '思考中', working: '工作中', working_long: '长任务',
+  done: '完成', idle: '待命', offline: '离线', error: '异常',
+};
+const STATE_ORDER = ['thinking','working','working_long','done','idle','offline','error'];
+
+const petImg = document.getElementById('pet');
+const led = document.getElementById('led');
+const stateEl = document.getElementById('state');
+const stateCn = document.getElementById('statecn');
+const fill = document.getElementById('fill');
+const ageEl = document.getElementById('age');
+const clockEl = document.getElementById('clock');
+const cliEl = document.getElementById('cli');
+const termEl = document.getElementById('term');
+const forcedTag = document.getElementById('forcedTag');
+const toast = document.getElementById('toast');
+
+let lastGifState = null;
+let bust = 0;
+let lastState = null;
+
+function setVar(name, val){ document.documentElement.style.setProperty(name, val); }
+
+function toastMsg(t){
+  toast.textContent = t; toast.classList.add('show');
+  setTimeout(()=>toast.classList.remove('show'), 900);
+}
+
+function applyState(s){
+  const color = COLORS[s] || '#00f0ff';
+  setVar('--st', color);
+  led.style.background = color; led.style.boxShadow = '0 0 8px ' + color;
+  stateEl.textContent = (s||'boot').toUpperCase();
+  stateCn.textContent = CN[s] || '';
+  petImg.classList.toggle('dim', s === 'offline');
+
+  if (s !== lastGifState){
+    lastGifState = s;
+    bust++;
+    petImg.src = 'gifs/' + (GIFS[s] || GIFS.idle) + '?v=' + bust;
+  }
+}
+
+function tick(){
+  const now = Date.now();
+  const d = new Date();
+  clockEl.textContent =
+    String(d.getHours()).padStart(2,'0') + ':' +
+    String(d.getMinutes()).padStart(2,'0') + ':' +
+    String(d.getSeconds()).padStart(2,'0');
+
+  if (lastState){
+    const age = Math.max(0, now - lastState.lastActivity);
+    const pct = Math.min(100, (age / 30000) * 100);
+    fill.style.width = pct.toFixed(1) + '%';
+    ageEl.textContent = 'AGE ' + (age/1000).toFixed(1) + 's';
+  }
+}
+
+function render(json){
+  lastState = json;
+  applyState(json.state);
+  cliEl.textContent = json.claude ? 'ON' : 'OFF';
+  termEl.textContent = json.term ? (json.termAlive ? 'PID ' + json.term : 'GONE') : '--';
+  forcedTag.textContent = json.forced ? '[DBG ' + json.state.toUpperCase() + ']' : '';
+}
+
+async function poll(){
+  try{
+    const r = await fetch('/api/state', {cache:'no-store'});
+    const j = await r.json();
+    if (j.shutdown){ window.close(); return; }
+    render(j);
+  }catch(e){
+    // server gone -> close the pet window
+    try{ window.close(); }catch(_){}
+  }
+}
+
+function api(path){
+  return fetch(path, {method:'POST'}).catch(()=>{});
+}
+
+// actions
+document.getElementById('bFocus').onclick = ()=>{ api('/api/focus'); toastMsg('FOCUS'); };
+document.getElementById('bTerm').onclick = (e)=>{
+  const min = e.target.textContent === '收起';
+  api('/api/terminal?act=' + (min ? 'min' : 'restore'));
+  e.target.textContent = min ? '打开' : '收起';
+  toastMsg(min ? 'MIN' : 'RESTORE');
+};
+document.getElementById('bDebug').onclick = ()=>{
+  api('/api/debug?cycle=1');
+  toastMsg('DBG CYCLE');
+};
+document.getElementById('bExit').onclick = ()=>{ api('/api/exit'); };
+
+petImg.addEventListener('dblclick', ()=>{ api('/api/focus'); toastMsg('FOCUS TERM'); });
+
+document.addEventListener('keydown', (e)=>{
+  if (e.key === 'd' || e.key === 'D'){ api('/api/debug?cycle=1'); toastMsg('DBG'); }
+  if (e.key === 'Escape'){ api('/api/exit'); }
+});
+
+// boot
+(function(){
+  const init = window.__INIT__ || {};
+  render(init);
+  tick();
+})();
+
+setInterval(tick, 1000);
+setInterval(poll, 500);
+</script>
+</body>
+</html>

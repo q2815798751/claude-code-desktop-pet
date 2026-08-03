@@ -1,0 +1,356 @@
+// CLAUDE.PET server — zero external dependencies (Node built-ins only)
+// Windows desktop pet that reflects claude code CLI working state.
+// HTTP server @127.0.0.1:9876, SSR injects init state, client polls every 500ms.
+'use strict';
+
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const { exec, execFile } = require('child_process');
+
+const ROOT = __dirname;
+const HTML_FILE = path.join(ROOT, 'pet.html');
+const PS_FILE = path.join(ROOT, 'pet.ps1');
+const TERM_PID_FILE = path.join(ROOT, 'term.pid');
+const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
+
+const PORT = 9876;
+const HOST = '127.0.0.1';
+
+// state thresholds (ms)
+const THINK_MS = 5000;        // thinking  <5s of continuous activity
+const WORK_MS = 30000;        // working   <30s
+const BURST_GAP_MS = 25000;   // a write within this window keeps a burst alive
+const DONE_HOLD_MS = 5000;    // done state holds 5s
+const SHUTDOWN_HOLD_MS = 2500;// self-exit within 5s of terminal death
+const ERROR_WINDOW_MS = 30000;// recent tool error within 30s -> error state
+const PROC_CHECK_MS = 2000;   // re-run tasklist at most every 2s
+const WINDOW_STALE_MS = 5000; // pet window considered alive if polled within 5s
+
+const GIF_EXT = { '.gif': 'image/gif', '.png': 'image/png', '.ico': 'image/x-icon' };
+
+// ---- mutable state ----
+let claudeAlive = null;
+let termAlive = null;
+let lastProcCheck = 0;
+let lastActivity = 0;          // ms epoch of newest transcript write
+let lastActivityChecked = 0;
+let burstStart = 0;            // when current work burst started
+let wasActive = false;
+let doneUntil = 0;
+let state = 'offline';
+let stateSince = Date.now();
+let forced = null;             // debug override: 'auto' | a state name
+let lastError = null;          // {at, msg}
+let shuttingDown = false;
+let shutdownAt = 0;
+let windowActiveAt = 0;
+let termPid = readTermPid();
+
+// ---- tiny helpers ----
+function readTermPid() {
+  try {
+    const s = fs.readFileSync(TERM_PID_FILE, 'utf8').trim();
+    const n = parseInt(s, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch { return null; }
+}
+
+function scanLatestMtime() {
+  let m = 0;
+  let dirs = [];
+  try { dirs = fs.readdirSync(PROJECTS_DIR); } catch { return m; }
+  for (const proj of dirs) {
+    const d = path.join(PROJECTS_DIR, proj);
+    try { if (!fs.statSync(d).isDirectory()) continue; } catch { continue; }
+    let files = [];
+    try { files = fs.readdirSync(d); } catch { continue; }
+    for (const f of files) {
+      if (!f.endsWith('.jsonl')) continue;
+      try {
+        const st = fs.statSync(path.join(d, f));
+        if (st.mtimeMs > m) m = st.mtimeMs;
+      } catch {}
+    }
+  }
+  return m;
+}
+
+function newestTranscriptPath() {
+  let best = null, bestT = 0;
+  try {
+    for (const proj of fs.readdirSync(PROJECTS_DIR)) {
+      const d = path.join(PROJECTS_DIR, proj);
+      try { if (!fs.statSync(d).isDirectory()) continue; } catch { continue; }
+      for (const f of fs.readdirSync(d)) {
+        if (!f.endsWith('.jsonl')) continue;
+        const p = path.join(d, f);
+        try { const st = fs.statSync(p); if (st.mtimeMs > bestT) { bestT = st.mtimeMs; best = p; } } catch {}
+      }
+    }
+  } catch {}
+  return best;
+}
+
+function scanRecentError(now) {
+  const file = newestTranscriptPath();
+  if (!file) return null;
+  try {
+    const size = fs.statSync(file).size;
+    if (size === 0) return null;
+    const start = Math.max(0, size - 128 * 1024);
+    const fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(size - start);
+    try { fs.readSync(fd, buf, 0, buf.length, start); } finally { fs.closeSync(fd); }
+    const lines = buf.toString('utf8').split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line.startsWith('{')) continue;
+      if (!/"isError"\s*:\s*true/.test(line)) continue;
+      let ts;
+      try {
+        const o = JSON.parse(line);
+        ts = o.timestamp ? new Date(o.timestamp).getTime() : NaN;
+      } catch { ts = NaN; }
+      if (Number.isFinite(ts) && now - ts <= ERROR_WINDOW_MS) {
+        return { at: ts, msg: 'tool error' };
+      }
+      // if the newest error line is older than the window, nothing recent
+      if (Number.isFinite(ts) && now - ts > ERROR_WINDOW_MS) return null;
+    }
+  } catch {}
+  return null;
+}
+
+// ---- process checks (spawn tasklist, cached every PROC_CHECK_MS) ----
+function run(cmd) {
+  return new Promise((resolve) => {
+    exec(cmd, { windowsHide: true, timeout: 4000 }, (err, stdout) => {
+      resolve(err ? '' : (stdout || ''));
+    });
+  });
+}
+
+function claudeAliveCheck() {
+  // claude.exe (native / WinGet) OR node.exe running the Claude Code CLI (npm install).
+  // Exclude our own server process (command line contains 'server.js') so an install
+  // under a path like ...\ClaudePet\app\server.js is never a false positive.
+  return new Promise((resolve) => {
+    execFile('powershell.exe', [
+      '-NoProfile', '-WindowStyle', 'Hidden', '-Command',
+      "$m = Get-CimInstance Win32_Process | Where-Object { ( $_.Name -eq 'claude.exe' ) -or ( $_.Name -eq 'node.exe' -and $_.CommandLine -match 'claude-code|@anthropic-ai|cli\\.js' -and $_.CommandLine -notmatch 'server\\.js' ) }; if ( $m ) { '1' } else { '0' }"
+    ], { windowsHide: true, timeout: 5000 }, (err, out) => {
+      resolve(!err && /1/.test((out || '').trim()));
+    });
+  });
+}
+
+function pidAliveCheck(pid) {
+  return run(`tasklist /FI "PID eq ${pid}" /NH`)
+    .then((out) => out.includes(String(pid)));
+}
+
+async function updateProcesses() {
+  const tasks = [claudeAliveCheck()];
+  if (termPid) tasks.push(pidAliveCheck(termPid));
+  const [c, t] = await Promise.all(tasks);
+  claudeAlive = !!c;
+  if (termPid) termAlive = !!t;
+}
+
+// ---- state machine ----
+function computeState(now) {
+  if (shuttingDown) { state = 'offline'; return; }
+  if (forced && forced !== 'auto') { if (state !== forced) { state = forced; stateSince = now; } return; }
+
+  // error overrides working states (still needs claude alive)
+  if (lastError && claudeAlive) {
+    if (state !== 'error') { state = 'error'; stateSince = now; wasActive = false; }
+    return;
+  }
+
+  if (!claudeAlive) {
+    wasActive = false;
+    if (state !== 'offline') { state = 'offline'; stateSince = now; }
+    return;
+  }
+
+  const age = now - lastActivity;
+  if (age < BURST_GAP_MS) {
+    // ongoing burst
+    if (!wasActive) { burstStart = now; wasActive = true; }
+    const dur = now - burstStart;
+    let s = dur < THINK_MS ? 'thinking' : dur < WORK_MS ? 'working' : 'working_long';
+    if (state !== s) { state = s; stateSince = now; }
+  } else {
+    // quiet: burst ended
+    if (wasActive) { doneUntil = now + DONE_HOLD_MS; wasActive = false; }
+    let s = now < doneUntil ? 'done' : 'idle';
+    if (state !== s) { state = s; stateSince = now; }
+  }
+}
+
+function beginShutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  shutdownAt = Date.now();
+  state = 'offline';
+  stateSince = shutdownAt;
+  // graceful: client polls shutdown:true and calls window.close();
+  // fallback: force-close the pet Edge window so it never lingers.
+  setTimeout(killPetEdge, 800);
+}
+
+function windowActive() {
+  return (Date.now() - windowActiveAt) < WINDOW_STALE_MS;
+}
+
+// ---- PowerShell window ops (execFile avoids cmd mangling of Unicode paths) ----
+function psRun(action, pid) {
+  const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', PS_FILE, '-Action', action];
+  if (pid) args.push('-ProcId', String(pid));
+  execFile('powershell.exe', args, { windowsHide: true }, (err, so, se) => {
+    if (err || (se && se.trim())) console.log('[ps:' + action + ']', err && err.message, se && se.trim().split('\n').slice(0, 3).join(' | '));
+  });
+}
+
+// ---- poll loop ----
+function killPetEdge() {
+  execFile('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
+    "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | Where-Object { $_.CommandLine -like '*edge_profile*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+  ], { windowsHide: true }, () => {});
+}
+
+async function poll() {
+  const now = Date.now();
+
+  // adopt a (possibly new) terminal pid written by start-both.bat
+  const newPid = readTermPid();
+  if (newPid !== termPid) {
+    termPid = newPid;
+    termAlive = null;          // unknown until checked
+    lastProcCheck = 0;         // force a process check this poll
+  }
+
+  if (now - lastProcCheck > PROC_CHECK_MS) {
+    lastProcCheck = now;
+    await updateProcesses();
+  }
+  lastActivity = scanLatestMtime();
+  lastError = scanRecentError(now);
+  computeState(now);
+
+  // terminal died -> pet self-exits within 5s (only when we know it is dead)
+  if (!shuttingDown && termPid && termAlive === false) beginShutdown();
+  if (shuttingDown && now - shutdownAt >= SHUTDOWN_HOLD_MS) {
+    process.exit(0);
+  }
+}
+
+setInterval(() => { poll().catch(() => {}); }, 500);
+
+// ---- HTTP ----
+function stateJson() {
+  const now = Date.now();
+  return {
+    state,
+    since: stateSince,
+    lastActivity,
+    ageMs: Math.max(0, now - lastActivity),
+    claude: claudeAlive,
+    term: termPid,
+    termAlive: termAlive === null ? null : !!termAlive,
+    forced: !!forced,
+    shutdown: shuttingDown,
+    ts: now,
+  };
+}
+
+function json(res, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(body);
+}
+
+function serveHtml(res) {
+  let html;
+  try { html = fs.readFileSync(HTML_FILE, 'utf8'); } catch {
+    res.writeHead(500); res.end('pet.html missing'); return;
+  }
+  const init = JSON.stringify(stateJson());
+  html = html.replace('__INIT_PAYLOAD__', init);
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(html);
+}
+
+function serveFile(res, name) {
+  const safe = path.basename(name);
+  const file = path.join(ROOT, safe);
+  if (!fs.existsSync(file)) { res.writeHead(404); res.end('not found'); return; }
+  const type = GIF_EXT[path.extname(safe).toLowerCase()] || 'application/octet-stream';
+  res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
+  fs.createReadStream(file).pipe(res);
+}
+
+const server = http.createServer((req, res) => {
+  let u;
+  try { u = new URL(req.url, `http://${HOST}:${PORT}`); } catch { res.writeHead(400); res.end(); return; }
+  const p = u.pathname;
+  const q = u.searchParams;
+
+  try {
+    if (req.method === 'GET' && p === '/') return serveHtml(res);
+    if (req.method === 'GET' && p === '/api/state') { windowActiveAt = Date.now(); return json(res, stateJson()); }
+    if (req.method === 'GET' && p === '/api/health') return json(res, { server: true, window: windowActive(), state, shutdown: shuttingDown });
+    if (req.method === 'GET' && p === '/api/window') { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end(windowActive() ? '1' : '0'); return; }
+
+    if (req.method === 'POST' && p === '/api/open') {
+      psRun('open');
+      return json(res, { ok: true });
+    }
+    if (req.method === 'POST' && p === '/api/focus') {
+      psRun('focus', termPid);
+      return json(res, { ok: true });
+    }
+    if (req.method === 'POST' && p === '/api/terminal') {
+      const act = q.get('act') === 'restore' ? 'restore' : 'min';
+      psRun(act, termPid);
+      return json(res, { ok: true });
+    }
+    if (req.method === 'POST' && p === '/api/debug') {
+      if (q.has('cycle')) {
+        const list = ['auto', 'thinking', 'working', 'working_long', 'done', 'idle', 'offline', 'error'];
+        const idx = list.indexOf(forced || 'auto');
+        forced = list[(idx + 1) % list.length];
+      } else if (q.has('state')) {
+        const s = q.get('state');
+        forced = s === 'auto' ? null : s;
+      } else {
+        forced = forced ? null : 'thinking';
+      }
+      stateSince = Date.now();
+      return json(res, { ok: true, forced });
+    }
+    if (req.method === 'POST' && p === '/api/exit') {
+      beginShutdown();
+      return json(res, { ok: true });
+    }
+
+    if (req.method === 'GET' && p.startsWith('/gifs/')) {
+      return serveFile(res, p.slice('/gifs/'.length));
+    }
+
+    res.writeHead(404); res.end('not found');
+  } catch (e) {
+    try { res.writeHead(500); res.end('error'); } catch {}
+  }
+});
+
+server.listen(PORT, HOST, () => {
+  console.log(`[pet] listening on http://${HOST}:${PORT}`);
+  updateProcesses().then(() => {
+    // stale term pid at startup -> shut down
+    if (termPid && termAlive === false) beginShutdown();
+  }).catch(() => {});
+});

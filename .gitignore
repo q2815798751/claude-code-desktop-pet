@@ -1,0 +1,12 @@
+# runtime artifacts
+term.pid
+_server.log
+*.log
+edge_profile/
+node_modules/
+dist/
+
+# os noise
+.DS_Store
+Thumbs.db
+desktop.ini
