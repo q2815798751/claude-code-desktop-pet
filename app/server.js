@@ -21,12 +21,13 @@ const HOST = '127.0.0.1';
 // state thresholds (ms)
 const THINK_MS = 5000;        // thinking  <5s of continuous activity
 const WORK_MS = 30000;        // working   <30s
-const BURST_GAP_MS = 25000;   // a write within this window keeps a burst alive
 const DONE_HOLD_MS = 5000;    // done state holds 5s
+const STALE_MS = 600000;      // a working marker older than this is treated as idle (safety)
 const SHUTDOWN_HOLD_MS = 2500;// self-exit within 5s of terminal death
 const ERROR_WINDOW_MS = 30000;// recent tool error within 30s -> error state
 const PROC_CHECK_MS = 2000;   // re-run tasklist at most every 2s
 const WINDOW_STALE_MS = 5000; // pet window considered alive if polled within 5s
+const TAIL_BYTES = 256 * 1024;// bytes read from the tail of the newest transcript
 
 const GIF_EXT = { '.gif': 'image/gif', '.png': 'image/png', '.ico': 'image/x-icon' };
 
@@ -34,10 +35,9 @@ const GIF_EXT = { '.gif': 'image/gif', '.png': 'image/png', '.ico': 'image/x-ico
 let claudeAlive = null;
 let termAlive = null;
 let lastProcCheck = 0;
-let lastActivity = 0;          // ms epoch of newest transcript write
-let lastActivityChecked = 0;
-let burstStart = 0;            // when current work burst started
-let wasActive = false;
+let lastActivity = 0;          // ms epoch of the last transcript event (for display)
+let turnStart = 0;             // when the current working stretch began
+let wasWorking = false;
 let doneUntil = 0;
 let state = 'offline';
 let stateSince = Date.now();
@@ -159,36 +159,100 @@ async function updateProcesses() {
   if (termPid) termAlive = !!t;
 }
 
+// ---- transcript content classification ----
+// Claude Code appends one JSONL line per message EVENT (user input, tool_result,
+// assistant thinking/text/tool_use), but does NOT write during long text streaming.
+// So the last meaningful line tells us the phase: working markers (user/tool/thinking/
+// tool_use) mean claude is mid-turn; a pure-text assistant line means the turn finished.
+function classifyMessage(o) {
+  const t = o.type || '';
+  const role = (o.message && o.message.role) || '';
+  const content = o.message && o.message.content;
+  const kinds = Array.isArray(content) ? content.map((c) => (c && c.type) || '') : [];
+  if (t === 'user') return 'working'; // input or tool_result -> claude is mid-turn
+  if (t === 'assistant' || role === 'assistant') {
+    if (kinds.includes('thinking') || kinds.includes('tool_use')) return 'working';
+    if (kinds.includes('text')) {
+      const nonText = kinds.filter((k) => k && k !== 'text');
+      return nonText.length === 0 ? 'done' : 'working'; // pure text = turn finished
+    }
+    return 'working';
+  }
+  return null; // metadata / other lines are skipped
+}
+
+function readLastMessage() {
+  const file = newestTranscriptPath();
+  if (!file) return null;
+  try {
+    const size = fs.statSync(file).size;
+    if (size === 0) return null;
+    const start = Math.max(0, size - TAIL_BYTES);
+    const fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(size - start);
+    try { fs.readSync(fd, buf, 0, buf.length, start); } finally { fs.closeSync(fd); }
+    const text = buf.toString('utf8');
+    const partial = text.length > 0 && text.charAt(text.length - 1) !== '\n';
+    const lines = text.split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line.startsWith('{')) continue;
+      let o;
+      try { o = JSON.parse(line); } catch { continue; }
+      const ts = o.timestamp ? new Date(o.timestamp).getTime() : NaN;
+      if (!Number.isFinite(ts)) continue; // metadata line, skip
+      const kind = classifyMessage(o);
+      if (!kind) continue;
+      return { kind, ts };
+    }
+    if (partial) return { kind: 'working', ts: Date.now() }; // mid-append = actively writing
+  } catch {}
+  return null;
+}
+
 // ---- state machine ----
-function computeState(now) {
+function computeState(now, msg) {
   if (shuttingDown) { state = 'offline'; return; }
   if (forced && forced !== 'auto') { if (state !== forced) { state = forced; stateSince = now; } return; }
 
   // error overrides working states (still needs claude alive)
   if (lastError && claudeAlive) {
-    if (state !== 'error') { state = 'error'; stateSince = now; wasActive = false; }
+    if (state !== 'error') { state = 'error'; stateSince = now; wasWorking = false; }
     return;
   }
 
   if (!claudeAlive) {
-    wasActive = false;
+    wasWorking = false;
     if (state !== 'offline') { state = 'offline'; stateSince = now; }
     return;
   }
 
-  const age = now - lastActivity;
-  if (age < BURST_GAP_MS) {
-    // ongoing burst
-    if (!wasActive) { burstStart = now; wasActive = true; }
-    const dur = now - burstStart;
-    let s = dur < THINK_MS ? 'thinking' : dur < WORK_MS ? 'working' : 'working_long';
-    if (state !== s) { state = s; stateSince = now; }
-  } else {
-    // quiet: burst ended
-    if (wasActive) { doneUntil = now + DONE_HOLD_MS; wasActive = false; }
-    let s = now < doneUntil ? 'done' : 'idle';
-    if (state !== s) { state = s; stateSince = now; }
+  if (!msg) {
+    // claude alive but no transcript yet (fresh install / never ran in a project)
+    wasWorking = false;
+    if (state !== 'idle') { state = 'idle'; stateSince = now; }
+    return;
   }
+
+  if (msg.kind === 'done') {
+    // turn finished: assistant pure text -> flash done 5s, then idle
+    if (wasWorking) { doneUntil = now + DONE_HOLD_MS; wasWorking = false; }
+    const s = now < doneUntil ? 'done' : 'idle';
+    if (state !== s) { state = s; stateSince = now; }
+    return;
+  }
+
+  // working marker: claude is mid-turn (user input / tool_result / thinking / tool_use)
+  if (!wasWorking) { turnStart = msg.ts || now; wasWorking = true; }
+  if (msg.ts && (now - msg.ts) > STALE_MS) {
+    // safety: marker very old with no follow-up -> not really active anymore
+    wasWorking = false;
+    if (state !== 'idle') { state = 'idle'; stateSince = now; }
+    return;
+  }
+  const dur = now - turnStart;
+  const s = dur < THINK_MS ? 'thinking' : dur < WORK_MS ? 'working' : 'working_long';
+  if (state !== s) { state = s; stateSince = now; }
 }
 
 function beginShutdown() {
@@ -237,9 +301,10 @@ async function poll() {
     lastProcCheck = now;
     await updateProcesses();
   }
-  lastActivity = scanLatestMtime();
+  const msg = readLastMessage();
+  lastActivity = msg ? msg.ts : scanLatestMtime();
   lastError = scanRecentError(now);
-  computeState(now);
+  computeState(now, msg);
 
   // terminal died -> pet self-exits within 5s (only when we know it is dead)
   if (!shuttingDown && termPid && termAlive === false) beginShutdown();
