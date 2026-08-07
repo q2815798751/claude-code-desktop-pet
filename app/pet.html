@@ -63,9 +63,9 @@ html,body{width:100%;height:100%;overflow:hidden;background:transparent;   /* tr
   text-shadow:0 0 8px var(--st),0 0 16px var(--st)}
 
 /* bubble menu */
-#bubbles{position:absolute;inset:0;pointer-events:none;z-index:50}
+#bubbles{position:fixed;inset:0;pointer-events:none;z-index:50}
 #bubbles.show{pointer-events:auto}
-.bubble{position:absolute;left:50%;top:50%;width:46px;height:46px;border-radius:50%;
+.bubble{position:fixed;width:46px;height:46px;border-radius:50%;
   display:flex;align-items:center;justify-content:center;cursor:pointer;
   background:rgba(var(--ac-rgb),.13);border:1px solid rgba(var(--ac-rgb),.5);
   color:var(--txt);font-size:calc(9px*var(--fs));letter-spacing:1px;white-space:nowrap;
@@ -150,7 +150,6 @@ window.__CONFIG__ = __CONFIG_PAYLOAD__;
   <div class="ball-ring"></div>
   <img id="ballPet" class="ball-pet" alt="pet" draggable="false">
   <div id="ballStatus" class="ball-status">待命</div>
-  <div id="bubbles"></div>
 </div>
 
 <!-- ============ PANEL ============ -->
@@ -183,6 +182,7 @@ window.__CONFIG__ = __CONFIG_PAYLOAD__;
   </div>
 </div>
 
+<div id="bubbles"></div>
 <div id="toast"></div>
 
 <script>
@@ -327,7 +327,7 @@ const BUBBLES = [
   {act:'op-', label:'-透'},
   {act:'exit', label:'退出', bad:true},
 ];
-function showBubbles(){
+function showBubbles(cx, cy){
   bubblesEl.innerHTML = '';
   const n = BUBBLES.length;
   BUBBLES.forEach((b, i) => {
@@ -336,11 +336,12 @@ function showBubbles(){
     el.textContent = b.label;
     const ang = (Math.PI*2*i/n) - Math.PI/2;
     const R = 56;
-    const x = Math.cos(ang)*R, y = Math.sin(ang)*R;
-    el.style.transform = 'translate(calc(-50% + ' + x + 'px), calc(-50% + ' + y + 'px)) scale(0)';
+    const px = cx + Math.cos(ang)*R, py = cy + Math.sin(ang)*R;
+    el.style.left = px + 'px'; el.style.top = py + 'px';
+    el.style.transform = 'translate(-50%,-50%) scale(0)';
     el.addEventListener('click', (e) => { e.stopPropagation(); bubbleAction(b.act); });
     bubblesEl.appendChild(el);
-    setTimeout(() => { el.style.transform = 'translate(calc(-50% + ' + x + 'px), calc(-50% + ' + y + 'px)) scale(1)'; }, 20 + i*40);
+    setTimeout(() => { el.style.transform = 'translate(-50%,-50%) scale(1)'; }, 20 + i*40);
   });
   bubblesEl.classList.add('show');
 }
@@ -358,26 +359,42 @@ function bubbleAction(act){
 }
 
 // ---- ball interactions ----
+let dragMoved = false;
 ball.addEventListener('pointerdown', (e) => {
   if (e.button === 2) return;               // right-click handled by contextmenu
   ball.setPointerCapture(e.pointerId);
   ball._drag = { x: e.screenX, y: e.screenY };
+  dragMoved = false;
   ball.classList.add('dragging');
 });
 ball.addEventListener('pointermove', (e) => {
   if (!ball._drag) return;
   const dx = e.screenX - ball._drag.x, dy = e.screenY - ball._drag.y;
   ball._drag.x = e.screenX; ball._drag.y = e.screenY;
-  callHost('Move', dx, dy);
+  if (Math.abs(dx) + Math.abs(dy) > 2) dragMoved = true;
+  if (dragMoved) callHost('Move', dx, dy);
 });
 ball.addEventListener('pointerup', () => { ball._drag = null; ball.classList.remove('dragging'); });
+ball.addEventListener('click', () => { if (!dragMoved) setMode('panel'); });
 
-let hoverTimer = null;
-ball.addEventListener('mouseenter', () => { hoverTimer = setTimeout(() => setMode('panel'), 350); });
+// hover >1s expands the panel; mouse away >3s returns to ball
+let hoverTimer = null, leaveTimer = null;
+ball.addEventListener('mouseenter', () => { hoverTimer = setTimeout(() => setMode('panel'), 1000); });
 ball.addEventListener('mouseleave', () => { clearTimeout(hoverTimer); });
-ball.addEventListener('click', () => setMode('panel'));
-ball.addEventListener('contextmenu', (e) => { e.preventDefault(); if (mode === 'ball') showBubbles(); });
-document.addEventListener('click', (e) => { if (mode === 'ball' && !e.target.closest('.bubble')) hideBubbles(); });
+// right-click: open the panel (if ball) + bubble menu at the cursor
+document.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  if (mode === 'ball') setMode('panel');
+  showBubbles(e.clientX, e.clientY);
+});
+// mouse leaves the pet window for 3s -> collapse back to the ball
+document.body.addEventListener('mouseleave', () => {
+  clearTimeout(hoverTimer);
+  if (mode === 'panel') leaveTimer = setTimeout(() => setMode('ball'), 3000);
+});
+document.body.addEventListener('mouseenter', () => { clearTimeout(leaveTimer); });
+// click anywhere outside a bubble hides the menu
+document.addEventListener('click', (e) => { if (!e.target.closest('.bubble')) hideBubbles(); });
 
 // ---- panel actions ----
 document.getElementById('bTheme').onclick = () => { cycleTheme(); };
