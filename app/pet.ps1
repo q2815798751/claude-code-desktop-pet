@@ -11,6 +11,7 @@ public class PetWin {
     [DllImport("user32.dll")]   public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")]   public static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll")]   public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]   public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
     [DllImport("user32.dll", SetLastError = true)] public static extern bool SystemParametersInfo(uint a, uint b, IntPtr c, uint d);
     [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
     [DllImport("kernel32.dll")] public static extern bool AttachConsole(uint dwProcessId);
@@ -18,26 +19,22 @@ public class PetWin {
     [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
 
     [StructLayout(LayoutKind.Sequential)]
+    public struct MOUSEINPUT {
+        public int dx; public int dy; public uint mouseData; public uint dwFlags; public uint time; public IntPtr dwExtraInfo;
+    }
+    [StructLayout(LayoutKind.Sequential)]
     public struct KEYBDINPUT {
-        public ushort wVk;
-        public ushort wScan;
-        public uint dwFlags;
-        public uint time;
-        public IntPtr dwExtraInfo;
+        public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public IntPtr dwExtraInfo;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct HARDWAREINPUT {
+        public uint uMsg; public ushort wParamL; public ushort wParamH;
     }
     [StructLayout(LayoutKind.Explicit)]
     public struct INPUTUNION {
-        [FieldOffset(0)] public KEYBDINPUT ki;
         [FieldOffset(0)] public MOUSEINPUT mi;
-    }
-    [StructLayout(LayoutKind.Sequential)]
-    public struct MOUSEINPUT {
-        public int dx;
-        public int dy;
-        public uint mouseData;
-        public uint dwFlags;
-        public uint time;
-        public IntPtr dwExtraInfo;
+        [FieldOffset(0)] public KEYBDINPUT ki;
+        [FieldOffset(0)] public HARDWAREINPUT hi;
     }
     [StructLayout(LayoutKind.Sequential)]
     public struct INPUT {
@@ -107,18 +104,17 @@ function Invoke-WindowAction {
     }
 }
 
-# copy a single INPUT_RECORD-style SendInput key to a list
-function Add-Key {
-    param($List, [int]$Vk, [int]$Scan, [int]$Flags)
+function Add-UnicodeKey {
+    param($List, [int]$Scan, [int]$Flags)
     $union = New-Object PetWin+INPUTUNION
     $ki = New-Object PetWin+KEYBDINPUT
-    $ki.wVk = $Vk
+    $ki.wVk = 0
     $ki.wScan = $Scan
     $ki.dwFlags = $Flags
     $ki.dwExtraInfo = [IntPtr]::Zero
     $union.ki = $ki
     $in = New-Object PetWin+INPUT
-    $in.type = 1
+    $in.type = 1   # INPUT_KEYBOARD
     $in.U = $union
     $List.Add($in) | Out-Null
 }
@@ -126,32 +122,50 @@ function Add-Key {
 function Send-TextToConsole {
     param([int]$Target, [string]$Text)
     if ($Text.Length -eq 0) { return }
-    $result = 'clipboard'   # fallback: text is on the clipboard, user pastes manually
-    # 1) copy text to clipboard (reliable Unicode transport incl. CJK)
-    try { [System.Windows.Forms.Clipboard]::SetText($Text) } catch {}
+    $result = 'clipboard'
+    try { [System.Windows.Forms.Clipboard]::SetText($Text) } catch {}   # safety net
 
     $hwnd = Get-ConsoleWindowHandle -Target $Target
     if ($hwnd -eq [IntPtr]::Zero) { Set-Content (Join-Path $PSScriptRoot 'send.result') $result; return }
 
-    # 2) focus the terminal (temporarily disable the foreground-lock timeout)
+    # focus the terminal (temporarily disable the foreground-lock timeout)
     $old = [IntPtr]::Zero
-    [PetWin]::SystemParametersInfo(0x2000, 0, $old, 0) | Out-Null   # SPI_GETFOREGROUNDLOCKTIMEOUT
-    [PetWin]::SystemParametersInfo(0x2001, 0, [IntPtr]::Zero, 0) | Out-Null  # SPI_SET -> 0
+    [PetWin]::SystemParametersInfo(0x2000, 0, $old, 0) | Out-Null
+    [PetWin]::SystemParametersInfo(0x2001, 0, [IntPtr]::Zero, 0) | Out-Null
     [PetWin]::ShowWindow($hwnd, 9) | Out-Null
     [PetWin]::SetForegroundWindow($hwnd) | Out-Null
-    Start-Sleep -Milliseconds 150
-    [PetWin]::SystemParametersInfo(0x2001, 0, $old, 0) | Out-Null   # restore timeout
+    Start-Sleep -Milliseconds 400
+    [PetWin]::SystemParametersInfo(0x2001, 0, $old, 0) | Out-Null
 
-    if ([PetWin]::GetForegroundWindow() -eq $hwnd) {
-        # 3) paste via Ctrl+V (text is in the clipboard)
+    # verify the foreground window belongs to the terminal process (handle may differ)
+    $fgPid = [uint32]0
+    [PetWin]::GetWindowThreadProcessId([PetWin]::GetForegroundWindow(), [ref]$fgPid) | Out-Null
+    if ($fgPid -eq [uint32]$Target) {
+        # type the text as Unicode key events + Enter
         $list = New-Object 'System.Collections.Generic.List[PetWin+INPUT]'
-        Add-Key $list 0x11 0 0          # CTRL down
-        Add-Key $list 0x56 0 0          # V down
-        Add-Key $list 0x56 0 0x0002     # V up
-        Add-Key $list 0x11 0 0x0002     # CTRL up
+        foreach ($ch in $Text.ToCharArray()) {
+            $sc = [uint16][char]$ch
+            Add-UnicodeKey $list $sc 0x0004                 # KEYEVENTF_UNICODE (down)
+            Add-UnicodeKey $list $sc 0x0006                 # ... | KEYEVENTF_KEYUP
+        }
+        Add-UnicodeKey $list 13 0                            # Enter (VK_RETURN via wScan? use wVk)
+        # Enter needs VK not unicode - build it via the union with wVk=13
+        $union = New-Object PetWin+INPUTUNION
+        $ki = New-Object PetWin+KEYBDINPUT
+        $ki.wVk = 13; $ki.wScan = 0; $ki.dwFlags = 0; $ki.dwExtraInfo = [IntPtr]::Zero
+        $union.ki = $ki
+        $in = New-Object PetWin+INPUT; $in.type = 1; $in.U = $union
+        $list.Add($in) | Out-Null
+        $ki.dwFlags = 0x0002   # KEYEVENTF_KEYUP
+        $union.ki = $ki
+        $in = New-Object PetWin+INPUT; $in.type = 1; $in.U = $union
+        $list.Add($in) | Out-Null
+
         $arr = $list.ToArray()
-        [PetWin]::SendInput([uint32]$arr.Length, $arr, [System.Runtime.InteropServices.Marshal]::SizeOf([PetWin+INPUT])) | Out-Null
-        $result = 'pasted'
+        # Marshal.SizeOf can't size Sequential+Explicit INPUT; INPUT is 40 bytes on x64, 28 on x86
+        $cb = if ([IntPtr]::Size -eq 8) { 40 } else { 28 }
+        $sent = [PetWin]::SendInput([uint32]$arr.Length, $arr, $cb)
+        if ($sent -gt 0) { $result = 'pasted' }
     }
     Set-Content (Join-Path $PSScriptRoot 'send.result') $result
 }
