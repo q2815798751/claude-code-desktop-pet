@@ -11,6 +11,8 @@
 - **即装即用**：`install.bat` 一键安装，`start-both.bat` 同时拉起 claude 终端和桌宠。
 - **环境自检**：启动/安装时检查 Node.js、Claude Code CLI、Edge、转录目录，缺什么告诉你装什么。
 
+![运行演示](docs/pet-demo.gif)
+
 ![设计参考](docs/design-reference.png)
 
 ## 快速开始
