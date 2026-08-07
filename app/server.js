@@ -13,8 +13,7 @@ const ROOT = __dirname;
 const HTML_FILE = path.join(ROOT, 'pet.html');
 const PS_FILE = path.join(ROOT, 'pet.ps1');
 const TERM_PID_FILE = path.join(ROOT, 'term.pid');
-const SEND_FILE = path.join(ROOT, 'send.txt');
-const SEND_RESULT_FILE = path.join(ROOT, 'send.result');
+const CONFIG_FILE = path.join(ROOT, 'config.json');
 const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 
 const PORT = 9876;
@@ -49,6 +48,13 @@ let shuttingDown = false;
 let shutdownAt = 0;
 let windowActiveAt = 0;
 let termPid = readTermPid();
+
+// persisted UI config (theme + font scale)
+let config = { theme: 'cyber', fs: 1 };
+try { config = Object.assign(config, JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'))); } catch {}
+function saveConfig() {
+  try { fs.writeFileSync(CONFIG_FILE, JSON.stringify(config), 'utf8'); } catch {}
+}
 
 // ---- tiny helpers ----
 function readTermPid() {
@@ -123,43 +129,6 @@ function scanRecentError(now) {
     }
   } catch {}
   return null;
-}
-
-// Read the recent conversation (user inputs + assistant text replies) from the
-// newest transcript tail, oldest -> newest. Tool calls are collapsed to nothing.
-function readRecentConv(max = 8) {
-  const file = newestTranscriptPath();
-  if (!file) return [];
-  try {
-    const size = fs.statSync(file).size;
-    if (size === 0) return [];
-    const start = Math.max(0, size - 256 * 1024);
-    const fd = fs.openSync(file, 'r');
-    const buf = Buffer.alloc(size - start);
-    try { fs.readSync(fd, buf, 0, buf.length, start); } finally { fs.closeSync(fd); }
-    const lines = buf.toString('utf8').split('\n');
-    const out = [];
-    for (let i = lines.length - 1; i >= 0 && out.length < max; i--) {
-      const line = lines[i].trim();
-      if (!line.startsWith('{')) continue;
-      let o;
-      try { o = JSON.parse(line); } catch { continue; }
-      const t = o.type || '';
-      const content = o.message && o.message.content;
-      if (!Array.isArray(content)) continue;
-      if (t === 'user') {
-        // user input only (not tool_result)
-        const hasToolResult = content.some((c) => c && c.type === 'tool_result');
-        if (hasToolResult) continue;
-        const text = content.filter((c) => c && c.type === 'text').map((c) => c.text || '').join(' ').trim();
-        if (text) out.unshift({ role: 'user', text: text.slice(0, 200) });
-      } else if (t === 'assistant') {
-        const text = content.filter((c) => c && c.type === 'text').map((c) => c.text || '').join(' ').trim();
-        if (text) out.unshift({ role: 'assistant', text: text.slice(0, 200) });
-      }
-    }
-    return out;
-  } catch { return []; }
 }
 
 // ---- process checks (spawn tasklist, cached every PROC_CHECK_MS) ----
@@ -318,14 +287,6 @@ function psRun(action, pid) {
   });
 }
 
-function psRunP(action, pid) {
-  return new Promise((resolve) => {
-    const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', PS_FILE, '-Action', action];
-    if (pid) args.push('-ProcId', String(pid));
-    execFile('powershell.exe', args, { windowsHide: true }, () => resolve());
-  });
-}
-
 // ---- poll loop ----
 function killPetEdge() {
   execFile('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
@@ -392,6 +353,7 @@ function serveHtml(res) {
   }
   const init = JSON.stringify(stateJson());
   html = html.replace('__INIT_PAYLOAD__', init);
+  html = html.replace('__CONFIG_PAYLOAD__', JSON.stringify(config));
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(html);
 }
@@ -431,23 +393,17 @@ const server = http.createServer((req, res) => {
       psRun(act, termPid);
       return json(res, { ok: true });
     }
-    if (req.method === 'GET' && p === '/api/conv') return json(res, { msgs: readRecentConv() });
-    if (req.method === 'POST' && p === '/api/send') {
+    if (req.method === 'POST' && p === '/api/config') {
       let body = '';
-      req.on('data', (c) => { body += c; if (body.length > 4096) req.destroy(); });
+      req.on('data', (c) => { body += c; if (body.length > 1024) req.destroy(); });
       req.on('end', () => {
-        let text = '';
-        try { text = String(JSON.parse(body || '{}').text || '').trim(); } catch {}
-        if (!text) return json(res, { ok: false, reason: 'empty' });
-        if (!claudeAlive || !termAlive) return json(res, { ok: false, reason: 'claude 未运行' });
-        if (state !== 'idle' && state !== 'done') return json(res, { ok: false, reason: 'claude 工作中，请等待' });
-        try { fs.writeFileSync(SEND_FILE, text, 'utf8'); } catch { return json(res, { ok: false, reason: '写入失败' }); }
-        try { fs.unlinkSync(SEND_RESULT_FILE); } catch {}
-        psRunP('send', termPid).then(() => {
-          let how = 'sent';
-          try { how = fs.readFileSync(SEND_RESULT_FILE, 'utf8').trim() || 'sent'; fs.unlinkSync(SEND_RESULT_FILE); } catch {}
-          return json(res, { ok: true, how });
-        });
+        try {
+          const c = JSON.parse(body || '{}');
+          if (typeof c.theme === 'string') config.theme = c.theme;
+          if (typeof c.fs === 'number') config.fs = Math.min(1.35, Math.max(0.85, c.fs));
+          saveConfig();
+          return json(res, { ok: true, config });
+        } catch { return json(res, { ok: false }); }
       });
       return;
     }

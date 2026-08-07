@@ -36,6 +36,11 @@ html[data-theme="gold"]{              /* 暗金 OLED */
   --scan:255,209,102;
 }
 
+:root{
+  --fs:1;                              /* global font/UI scale (0.85-1.35) */
+  --pet-size:clamp(210px, min(80%, 300px), 300px);
+}
+
 *{box-sizing:border-box;margin:0;padding:0;user-select:none;-webkit-user-select:none}
 html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-body);
   font-family:'Cascadia Code','Cascadia Mono',Consolas,'Microsoft YaHei',monospace;
@@ -61,30 +66,34 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-body);
 .corner.br{bottom:3px;right:3px;border-left:none;border-top:none}
 
 /* header */
-.header{display:flex;align-items:center;gap:6px;height:16px;flex:none}
+.header{display:flex;align-items:center;gap:6px;flex:none;min-height:16px}
 .led{width:8px;height:8px;border-radius:50%;background:var(--st);flex:none;
   box-shadow:0 0 8px var(--st);animation:blink 1.2s steps(1) infinite}
 @keyframes blink{50%{opacity:.25}}
-.title{font-size:10px;letter-spacing:2px;color:var(--dim);white-space:nowrap;overflow:hidden}
+.title{font-size:calc(10px * var(--fs));letter-spacing:2px;color:var(--dim);white-space:nowrap;overflow:hidden}
 .title b{color:var(--st);font-weight:600}
-.clock{margin-left:auto;font-size:10px;color:var(--dim);letter-spacing:1px}
+.clock{margin-left:auto;font-size:calc(10px * var(--fs));color:var(--dim);letter-spacing:1px}
+.fsctl{display:flex;gap:2px;margin-left:2px}
+.fsctl button{font-family:inherit;font-size:calc(11px * var(--fs));width:calc(15px * var(--fs));height:calc(15px * var(--fs));
+  line-height:1;color:var(--txt);background:rgba(var(--ac-rgb),.08);border:1px solid rgba(var(--ac-rgb),.3);
+  cursor:pointer;padding:0}
+.fsctl button:hover{background:rgba(var(--ac-rgb),.22)}
 
 /* state line */
 .statebox{flex:none;margin-top:4px}
-.stateline{font-size:17px;font-weight:700;letter-spacing:3px;color:var(--st);
+.stateline{font-size:calc(17px * var(--fs));font-weight:700;letter-spacing:3px;color:var(--st);
   text-shadow:0 0 8px var(--st),0 0 22px var(--st);display:flex;align-items:baseline;gap:8px}
-.stateline .cn{font-size:9px;letter-spacing:1px;color:var(--dim);font-weight:400}
+.stateline .cn{font-size:calc(9px * var(--fs));letter-spacing:1px;color:var(--dim);font-weight:400}
 .bar{flex:none;height:5px;margin-top:5px;position:relative;background:rgba(var(--scan),.08);
   border:1px solid rgba(var(--scan),.12)}
 .bar i{position:absolute;inset:0;width:0%;background:linear-gradient(90deg,var(--st),transparent);
   box-shadow:0 0 8px var(--st);transition:width .4s linear}
-.bar u{position:absolute;right:0;top:-1px;font-size:8px;color:var(--dim);
+.bar u{position:absolute;right:0;top:-1px;font-size:calc(8px * var(--fs));color:var(--dim);
   letter-spacing:1px;padding-right:1px}
 
-/* pet stage — always centered, scales a bit with window width */
-:root{--pet-size:clamp(170px, min(54%, 224px), 224px)}
-.stage{flex:1;min-height:110px;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.ring{position:absolute;width:calc(var(--pet-size) * 1.12);height:calc(var(--pet-size) * 1.12);border-radius:50%;
+/* pet stage — always centered, fills width better now */
+.stage{flex:1;min-height:150px;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.ring{position:absolute;width:calc(var(--pet-size) * 1.08);height:calc(var(--pet-size) * 1.08);border-radius:50%;
   border:1px solid rgba(var(--ac-rgb),.16);
   box-shadow:0 0 30px rgba(var(--ac-rgb),.10), inset 0 0 24px rgba(var(--ac-rgb),.05);
   animation:spin 14s linear infinite;pointer-events:none}
@@ -95,41 +104,19 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-body);
   filter:drop-shadow(0 0 14px rgba(var(--ac-rgb),.22))}
 #pet.dim{opacity:.75}
 
-/* conversation panel */
-.conv{flex:none;display:flex;flex-direction:column;margin-top:4px;
-  border:1px solid rgba(var(--ac-rgb),.25);background:rgba(var(--ac-rgb),.04)}
-.conv.hide{display:none}
-.conv-head{font-size:8px;letter-spacing:1px;color:var(--dim);padding:2px 6px;cursor:pointer;
-  display:flex;justify-content:space-between;align-items:center}
-.conv-body{max-height:58px;overflow-y:auto;font-size:9px;line-height:1.35;padding:2px 6px;
-  color:var(--txt);user-select:text;-webkit-user-select:text}
-.conv-body .m{word-break:break-all;margin:1px 0}
-.conv-body .u{color:var(--ac)}
-.conv-body .a{color:var(--dim)}
-
-/* input bar */
-.inputbar{flex:none;display:flex;gap:4px;margin-top:4px}
-#msg{flex:1;min-width:0;font-family:inherit;font-size:10px;color:var(--txt);
-  background:rgba(var(--ac-rgb),.06);border:1px solid rgba(var(--ac-rgb),.3);
-  padding:3px 6px;outline:none;user-select:text;-webkit-user-select:text}
-#msg::placeholder{color:var(--dim)}
-#bSend{flex:none;font-family:inherit;font-size:10px;letter-spacing:1px;color:var(--txt);
-  background:rgba(var(--ac-rgb),.1);border:1px solid rgba(var(--ac-rgb),.35);padding:3px 8px;cursor:pointer}
-#bSend:hover{background:rgba(var(--ac-rgb),.22)}
-
 /* footer */
 .footer{flex:none;margin-top:5px}
-.meta{display:flex;justify-content:space-between;font-size:9px;color:var(--dim);
+.meta{display:flex;justify-content:space-between;font-size:calc(9px * var(--fs));color:var(--dim);
   letter-spacing:1px;margin-bottom:5px}
 .meta b{color:var(--st);font-weight:400}
 .btns{display:flex;gap:4px}
-.btn{flex:1;font-family:inherit;font-size:9px;letter-spacing:1px;color:var(--txt);
-  background:rgba(var(--ac-rgb),.05);border:1px solid rgba(var(--ac-rgb),.28);padding:4px 0;
+.btn{flex:1;font-family:inherit;font-size:calc(9px * var(--fs));letter-spacing:1px;color:var(--txt);
+  background:rgba(var(--ac-rgb),.05);border:1px solid rgba(var(--ac-rgb),.28);padding:calc(4px * var(--fs)) 0;
   cursor:pointer;text-align:center;transition:all .15s}
 .btn:hover{background:rgba(var(--ac-rgb),.18);color:var(--txt);box-shadow:0 0 10px rgba(var(--ac-rgb),.4)}
 .btn.bad:hover{background:rgba(255,59,59,.2);border-color:#ff3b3b;box-shadow:0 0 10px rgba(255,59,59,.4)}
-#toast{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);
-  font-size:9px;letter-spacing:2px;color:var(--bg1);background:var(--st);
+#toast{position:absolute;left:50%;bottom:74px;transform:translateX(-50%);
+  font-size:calc(9px * var(--fs));letter-spacing:2px;color:var(--bg1);background:var(--st);
   padding:2px 8px;opacity:0;transition:opacity .2s;white-space:nowrap;pointer-events:none;
   box-shadow:0 0 12px var(--st);z-index:5}
 #toast.show{opacity:1}
@@ -144,6 +131,10 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-body);
     <span class="led" id="led"></span>
     <span class="title" id="titleTxt"><b>C:\&gt;</b> CLAUDE.PET // CYBER</span>
     <span class="clock" id="clock">--:--:--</span>
+    <span class="fsctl">
+      <button id="fsMinus" title="缩小字体">−</button>
+      <button id="fsPlus" title="放大字体">+</button>
+    </span>
   </div>
 
   <div class="statebox">
@@ -154,16 +145,6 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-body);
   <div class="stage">
     <div class="ring"></div>
     <img id="pet" alt="pet" draggable="false">
-  </div>
-
-  <div class="conv" id="conv">
-    <div class="conv-head" id="convHead"><span>▾ 对话</span><span id="convCnt"></span></div>
-    <div class="conv-body" id="convBody"></div>
-  </div>
-
-  <div class="inputbar">
-    <input id="msg" type="text" placeholder="发送给 claude…" autocomplete="off">
-    <button id="bSend" class="btn">发送</button>
   </div>
 
   <div class="footer">
@@ -185,6 +166,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-body);
 
 <script>
 window.__INIT__ = __INIT_PAYLOAD__;
+window.__CONFIG__ = __CONFIG_PAYLOAD__;
 
 const GIFS = {
   thinking: 'thinking.gif',
@@ -208,6 +190,7 @@ const CN = {
 };
 const THEMES = ['cyber', 'paper', 'matrix', 'gold'];
 const THEME_NAMES = { cyber: 'CYBER', paper: 'PAPER', matrix: 'MATRIX', gold: 'GOLD' };
+const FS_MIN = 0.85, FS_MAX = 1.35;
 
 const petImg = document.getElementById('pet');
 const led = document.getElementById('led');
@@ -221,17 +204,12 @@ const termEl = document.getElementById('term');
 const forcedTag = document.getElementById('forcedTag');
 const titleTxt = document.getElementById('titleTxt');
 const toast = document.getElementById('toast');
-const conv = document.getElementById('conv');
-const convHead = document.getElementById('convHead');
-const convBody = document.getElementById('convBody');
-const convCnt = document.getElementById('convCnt');
-const msgInput = document.getElementById('msg');
 
 let lastGifState = null;
 let bust = 0;
 let lastState = null;
 let theme = 'cyber';
-let lastConvKey = '';
+let fs = 1;
 
 function setVar(name, val){ document.documentElement.style.setProperty(name, val); }
 
@@ -256,12 +234,24 @@ function applyState(s){
   }
 }
 
+// ---- config persistence (localStorage + server config.json) ----
+function persistConfig(){
+  try {
+    localStorage.setItem('pet_theme', theme);
+    localStorage.setItem('pet_fs', String(fs));
+  } catch(_){}
+  try {
+    fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ theme, fs })}).catch(()=>{});
+  } catch(_){}
+}
+
 function applyTheme(t){
   theme = t;
   document.documentElement.setAttribute('data-theme', t);
-  try { localStorage.setItem('pet_theme', t); } catch(_) {}
   titleTxt.innerHTML = '<b>C:\\&gt;</b> CLAUDE.PET // ' + (THEME_NAMES[t] || 'CYBER');
   if (lastState) applyState(lastState.state);
+  persistConfig();
 }
 
 function cycleTheme(){
@@ -269,6 +259,11 @@ function cycleTheme(){
   const n = THEMES[(i + 1) % THEMES.length];
   applyTheme(n);
   toastMsg('THEME ' + (THEME_NAMES[n] || n));
+}
+
+function applyFs(v){
+  fs = Math.min(FS_MAX, Math.max(FS_MIN, v));
+  setVar('--fs', String(fs));
 }
 
 function tick(){
@@ -310,90 +305,52 @@ function api(path){
   return fetch(path, {method:'POST'}).catch(()=>{});
 }
 
-// ---- conversation ----
-function renderConv(msgs){
-  const key = JSON.stringify(msgs);
-  if (key === lastConvKey) return;
-  lastConvKey = key;
-  convBody.innerHTML = '';
-  for (const m of msgs){
-    const d = document.createElement('div');
-    d.className = 'm ' + (m.role === 'user' ? 'u' : 'a');
-    d.textContent = (m.role === 'user' ? '你 › ' : 'AI › ') + m.text;
-    convBody.appendChild(d);
-  }
-  convCnt.textContent = msgs.length ? msgs.length + ' 条' : '';
-  convBody.scrollTop = convBody.scrollHeight;
-}
-
-async function pollConv(){
-  try{
-    const r = await fetch('/api/conv', {cache:'no-store'});
-    const j = await r.json();
-    renderConv(j.msgs || []);
-  }catch(e){}
-}
-
-async function sendMsg(){
-  const v = msgInput.value.trim();
-  if (!v) return;
-  try{
-    const r = await fetch('/api/send', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ text: v })
-    });
-    const j = await r.json();
-    if (j.ok){
-      msgInput.value = '';
-      toastMsg(j.how === 'pasted' ? '已粘贴到终端' : (j.how === 'clipboard' ? '已复制，请在终端 Ctrl+V 粘贴' : '已发送 → claude'));
-    }
-    else toastMsg(j.reason || '发送失败');
-  }catch(e){ toastMsg('发送失败'); }
-}
-
 // actions
 document.getElementById('bTheme').onclick = ()=>{ cycleTheme(); };
 document.getElementById('bTerm').onclick = ()=>{ api('/api/terminal?act=toggle'); toastMsg('TERM TOGGLE'); };
-document.getElementById('bDebug').onclick = ()=>{
-  api('/api/debug?cycle=1');
-  toastMsg('DBG CYCLE');
-};
-document.getElementById('bExit').onclick = ()=>{ api('/api/exit'); };
-document.getElementById('bSend').onclick = ()=>{ sendMsg(); };
-
-convHead.onclick = ()=>{
-  const hidden = conv.classList.toggle('hide');
-  convHead.firstChild.textContent = hidden ? '▸ 对话' : '▾ 对话';
-};
-
-msgInput.addEventListener('keydown', (e)=>{
-  if (e.key === 'Enter'){ e.preventDefault(); sendMsg(); }
-});
+document.getElementById('bDebug').onclick = ()=>{ api('/api/debug?cycle=1'); toastMsg('DBG CYCLE'); };
+document.getElementById('bExit').onclick = ()=>{ persistConfig(); api('/api/exit'); };
+document.getElementById('fsPlus').onclick = ()=>{ applyFs(fs + 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); };
+document.getElementById('fsMinus').onclick = ()=>{ applyFs(fs - 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); };
 
 petImg.addEventListener('dblclick', ()=>{ api('/api/focus'); toastMsg('FOCUS TERM'); });
 
 document.addEventListener('keydown', (e)=>{
-  if (e.target === msgInput) return; // typing in the input
+  if (e.target === document.activeElement && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
   if (e.key === 't' || e.key === 'T'){ cycleTheme(); }
   if (e.key === 'd' || e.key === 'D'){ api('/api/debug?cycle=1'); toastMsg('DBG'); }
-  if (e.key === 'Escape'){ api('/api/exit'); }
+  if (e.key === 'Escape'){ persistConfig(); api('/api/exit'); }
+  if (e.key === '+' || e.key === '='){ applyFs(fs + 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); }
+  if (e.key === '-' || e.key === '_'){ applyFs(fs - 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); }
 });
+
+// save config on close / unload
+window.addEventListener('beforeunload', persistConfig);
+window.addEventListener('pagehide', persistConfig);
 
 // boot
 (function(){
-  let saved = 'cyber';
-  try { saved = localStorage.getItem('pet_theme') || 'cyber'; } catch(_) {}
-  if (THEMES.indexOf(saved) === -1) saved = 'cyber';
-  applyTheme(saved);
+  let savedTheme = 'cyber', savedFs = 1;
+  try {
+    const cfg = window.__CONFIG__ || {};
+    if (cfg.theme && THEMES.indexOf(cfg.theme) !== -1) savedTheme = cfg.theme;
+    if (typeof cfg.fs === 'number') savedFs = cfg.fs;
+    const t = localStorage.getItem('pet_theme');
+    if (t && THEMES.indexOf(t) !== -1) savedTheme = t;
+    const f = parseFloat(localStorage.getItem('pet_fs'));
+    if (isFinite(f)) savedFs = f;
+  } catch(_){}
+  theme = savedTheme;
+  fs = Math.min(FS_MAX, Math.max(FS_MIN, savedFs));
+  applyTheme(savedTheme);
+  applyFs(fs);
 
-  const init = window.__INIT__ || {};
-  render(init);
+  render(window.__INIT__ || {});
   tick();
 })();
 
 setInterval(tick, 1000);
 setInterval(poll, 500);
-setInterval(pollConv, 2000);
 </script>
 </body>
 </html>

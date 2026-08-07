@@ -52,8 +52,7 @@
 | `POST /api/terminal?act=toggle\|min\|restore` | 终端切换（最小化⇄还原置前）/ 最小化 / 还原 |
 | `POST /api/debug?state=X` | 强制状态 `X`（`auto` 恢复自动） |
 | `POST /api/debug?cycle=1` | 在 `auto→thinking→working→working_long→done→idle→offline→error` 间循环 |
-| `GET /api/conv` | 最近对话 `{msgs:[{role,text}]}`（用户输入 + AI 文本回复） |
-| `POST /api/send {text}` | 发送文本到 claude（仅空闲/完成时；写 `app/send.txt` → `pet.ps1 send` → WriteConsoleInput 注入终端） |
+| `POST /api/config {theme,fs}` | 保存 UI 配置到 `app/config.json`（主题 + 字号缩放） |
 | `POST /api/exit` | 关闭桌宠并退出服务（终端不动） |
 | `GET /gifs/<file>` | 状态 GIF |
 
@@ -63,8 +62,13 @@
   - `主题`：循环 4 套主题（`T` 键同效）。
   - `调试`：循环强制各状态验 GIF。
   - `退出`：关闭桌宠与服务。
-- **对话面板**：底部小字体显示最近对话，点"▾ 对话"可折叠；每 2s 自动刷新。
-- **输入条**：输入后回车或点"发送"把内容发给 claude；claude 忙碌/离线时会被拒绝并提示。
+- **字体缩放**：右上角 `−`/`+` 按钮（键盘 `-`/`=` 同效）整体缩放字号/UI（范围 0.85–1.35，默认 1.0）。
+
+## 配置持久化
+- UI 配置（主题 `theme` + 字号缩放 `fs`）**双保险保存**：
+  1. 客户端 `localStorage`（`pet_theme` / `pet_fs`，实时写）；
+  2. 服务端 `app/config.json`（`POST /api/config` 写盘，`GET /` SSR 注入 `window.__CONFIG__` 供首屏应用）。
+- 窗口关闭/退出（`beforeunload`/`pagehide`）前再保存一次，重开窗口配置不丢。
 
 ## 窗口缩放
 `#shell` 为流式宽度（`min-width:320px`），Edge 窗口可**横向拖拽缩放**；桌宠与圆环始终居中，尺寸按 `--pet-size` 自适应（封顶防 GIF 拉伸），主题配色任意宽度正常。窗口位置/初始尺寸见 `app/pet.ps1` 的 `Open-EdgeWindow`。

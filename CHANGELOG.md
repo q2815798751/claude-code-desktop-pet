@@ -2,6 +2,12 @@
 
 本文件记录 ClaudePet 的每次功能与修复改动。
 
+## v1.0.3 (2026-08-03)
+- **移除**：放弃"文本发送到 claude + 对话面板"功能（多种注入方案对控制台 claude 均不可靠），清理 `pet.html`/`server.js`/`pet.ps1` 中的相关代码与残留（`send.txt`/`send.result`）。
+- **feat 图片放大**：中心桌宠/圆环放大到 `min(80%,300px)`，左右留白大幅减少。
+- **feat 字体缩放**：右上角新增 `−`/`+` 按钮（键盘 `-`/`=` 同效），整体字号 `--fs` 等比缩放（范围 0.85–1.35，默认 1.0=当前状态），UI/按钮/主题随字号自适应不裁切。
+- **feat 配置持久化**：新增服务端 `app/config.json`（`POST /api/config` + SSR 注入 `__CONFIG__`），配合 `localStorage` 双写；窗口关闭/退出（`beforeunload`）前保存主题与字号。
+
 ## v1.0.2 (2026-08-03)
 - **feat 终端按钮合并**："焦点"+"收起/打开"合并为一个"终端"按钮：点一下终端最小化，再点还原并置前（`pet.ps1` 用 `IsIconic` 判断状态后切换）。双击桌宠仍为聚焦。
 - **feat 底部对话 + 文本输入**：桌宠底部新增对话面板（小字体、可折叠、自动滚动）显示最近对话，以及输入条可**发送文本到 claude**（回车或点"发送"）。发送走 **剪贴板 + 自动粘贴**（`Set-Clipboard` 保真 Unicode/中文 → 尝试聚焦终端 → `SendInput Ctrl+V`；聚焦失败则文本已在剪贴板，提示手动 Ctrl+V）。`WriteConsoleInput` 注入曾尝试但中文在 claude 的 VT 输入模式下必乱码，`SendInput` 打字又受 Windows 前台锁定限制，故采用剪贴板方案。仅当 claude 空闲时允许发送，忙碌/离线会 toast 提示；`/api/send` 返回 `how: pasted|clipboard` 供客户端提示。
