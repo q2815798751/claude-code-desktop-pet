@@ -1,8 +1,10 @@
 // CLAUDE.PET host - frameless transparent WebView2 window (floating ball)
-// Zero user-installed deps: uses built-in .NET Framework (WinForms) + WebView2 runtime.
+// Zero user-installed deps: built-in .NET Framework (WinForms) + WebView2 runtime.
+// Transparency uses DWM glass (NOT WS_EX_LAYERED) so WebView2 input keeps working.
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
@@ -11,7 +13,6 @@ using System.Web.Script.Serialization;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
-// COM-visible object exposed to the page as window.chrome.webview.hostObjects.petHost
 [ComVisible(true)]
 public class PetHostBridge
 {
@@ -34,6 +35,9 @@ public class MainForm : Form
     public const string TITLE = "CLAUDE.PET";
     private const int DEF_W = 150, DEF_H = 170;
 
+    [DllImport("dwmapi.dll")] public static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS m);
+    [StructLayout(LayoutKind.Sequential)] public struct MARGINS { public int left, right, top, bottom; }
+
     public MainForm()
     {
         _hostCfgPath = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "app", "host.json"));
@@ -42,16 +46,14 @@ public class MainForm : Form
 
         Text = TITLE;
         FormBorderStyle = FormBorderStyle.None;      // no title bar / min / close
-        // Setting TransparencyKey/Opacity enables the layered window automatically.
-        BackColor = Color.Magenta;                   // transparency key color
-        TransparencyKey = Color.Magenta;             // those pixels become see-through
+        BackColor = Color.Black;
         TopMost = GetBool("topmost", true);
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         ApplyPosition();
 
         _web = new WebView2 { Dock = DockStyle.Fill };
-        _web.DefaultBackgroundColor = Color.Transparent;   // page transparent areas show through
+        _web.DefaultBackgroundColor = Color.Transparent;   // page transparent areas show through (DWM glass)
         Controls.Add(_web);
 
         Shown += async (s, e) => { try { await InitWebAsync(); } catch (Exception ex) { File.WriteAllText(_hostCfgPath + ".err", ex.ToString()); } };
@@ -73,8 +75,6 @@ public class MainForm : Form
             y = sa.Bottom - Size.Height - 12;
         }
         Location = new Point(x, y);
-        double op = _cfg.ContainsKey("opacity") ? Convert.ToDouble(_cfg["opacity"]) : 100;
-        Opacity = Math.Max(0.15, Math.Min(1.0, op / 100.0));
     }
 
     public void MoveBy(int dx, int dy)
@@ -89,11 +89,21 @@ public class MainForm : Form
     }
     public void SetOpacity(int percent)
     {
-        Opacity = Math.Max(0.15, Math.Min(1.0, percent / 100.0));
+        int v = Math.Max(15, Math.Min(100, percent));
+        _cfg["opacity"] = v;
         SaveHostConfig();
+        ApplyPageOpacity();
     }
     public void SetTopMost(bool top) { TopMost = top; SaveHostConfig(); }
     public void CloseHost() { SaveHostConfig(); Close(); }
+
+    private void ApplyPageOpacity()
+    {
+        if (_web == null || _web.CoreWebView2 == null) return;
+        double op = _cfg.ContainsKey("opacity") ? Convert.ToDouble(_cfg["opacity"]) : 100;
+        string js = "document.documentElement.style.opacity = " + (op / 100.0).ToString("0.##", CultureInfo.InvariantCulture) + ";";
+        try { _web.CoreWebView2.ExecuteScriptAsync(js); } catch { }
+    }
 
     private void LoadHostConfig()
     {
@@ -113,7 +123,7 @@ public class MainForm : Form
     {
         _cfg["winX"] = Location.X; _cfg["winY"] = Location.Y;
         _cfg["winW"] = Size.Width; _cfg["winH"] = Size.Height;
-        _cfg["opacity"] = (int)(Opacity * 100);
+        if (!_cfg.ContainsKey("opacity")) _cfg["opacity"] = 100;
         _cfg["topmost"] = TopMost;
         try
         {
@@ -125,12 +135,17 @@ public class MainForm : Form
 
     private async Task InitWebAsync()
     {
+        // DWM glass frame into the client area -> transparent window WITHOUT WS_EX_LAYERED
+        var m = new MARGINS { left = -1, right = -1, top = -1, bottom = -1 };
+        DwmExtendFrameIntoClientArea(this.Handle, ref m);
+
         string dataDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "webview2data");
         var env = await CoreWebView2Environment.CreateAsync(null, dataDir, null);
         await _web.EnsureCoreWebView2Async(env);
         _web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
         _web.CoreWebView2.Settings.IsStatusBarEnabled = false;
         _web.CoreWebView2.AddHostObjectToScript("petHost", _bridge);
+        _web.CoreWebView2.NavigationCompleted += (s, e) => ApplyPageOpacity();
         _web.CoreWebView2.Navigate("http://127.0.0.1:9876/");
     }
 }

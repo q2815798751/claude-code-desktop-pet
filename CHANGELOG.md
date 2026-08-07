@@ -3,7 +3,8 @@
 本文件记录 ClaudePet 的每次功能与修复改动。
 
 ## v1.1.0 (2026-08-07) — 悬浮球化（无边框真透明宿主）
-- **架构**：新增 `host/`（WinForms + WebView2 无边框真透明宿主 `ClaudePet.Host.exe`），替代 Edge `--app` 窗口。无标题栏/最小化/关闭按钮，真透视、始终置顶、可拖动。
+- **架构**：新增 `host/`（WinForms + WebView2 无边框真透明宿主 `ClaudePet.Host.exe`），替代 Edge `--app` 窗口。无标题栏/最小化/关闭按钮，始终置顶、可拖动。
+- **透明方案**：用 **DWM 玻璃**（`DwmExtendFrameIntoClientArea` 负边距）+ WebView2 透明背景实现真透视。**关键**：不能用 `TransparencyKey`/`Opacity`（会启用 `WS_EX_LAYERED`，导致 WebView2 收不到鼠标输入——球显示正常但点不动）；DWM 方案非分层，输入正常，透明度改为宿主 `ExecuteScriptAsync` 设置页面 CSS 淡出。
 - **悬浮球**：平时仅显示可拖动的圆环+图片+状态字（待命/思考中…，位于图片与外环之间，展开后消失）；左键/悬停展开全面板；右键弹出**中心对称透明气泡菜单**（主题/终端/置顶/透明度±/退出）。
 - **透明度**：气泡 `+透/−透` 调节窗口透明度（真透视淡出，存 `host.json`）。
 - **置顶 + 记忆位置/大小**：始终置顶开关；窗口位置/大小/透明度持久化到 `app/host.json`，重开恢复。
