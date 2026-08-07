@@ -10,30 +10,39 @@ public class PetWin {
     [DllImport("user32.dll")]   public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")]   public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")]   public static extern bool IsIconic(IntPtr hWnd);
+    [DllImport("user32.dll")]   public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool SystemParametersInfo(uint a, uint b, IntPtr c, uint d);
+    [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
     [DllImport("kernel32.dll")] public static extern bool AttachConsole(uint dwProcessId);
     [DllImport("kernel32.dll")] public static extern bool FreeConsole();
     [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-    public static extern IntPtr CreateFile(string name, uint access, uint share, IntPtr sec, uint disp, uint flags, IntPtr tpl);
-    [DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr h, out uint m);
-    [DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr h, uint m);
-    [DllImport("kernel32.dll")] public static extern bool WriteConsoleInput(IntPtr hConsoleInput, INPUT_RECORD[] lpBuffer, uint nLength, out uint lpNumberOfEventsWritten);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern short VkKeyScanW(char ch);
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    public struct KEY_EVENT_RECORD {
-        public bool bKeyDown;
-        public ushort wRepeatCount;
-        public ushort wVirtualKeyCode;
-        public ushort wVirtualScanCode;
-        public char UnicodeChar;
-        public uint dwControlKeyState;
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KEYBDINPUT {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+    [StructLayout(LayoutKind.Explicit)]
+    public struct INPUTUNION {
+        [FieldOffset(0)] public KEYBDINPUT ki;
+        [FieldOffset(0)] public MOUSEINPUT mi;
     }
     [StructLayout(LayoutKind.Sequential)]
-    public struct INPUT_RECORD {
-        public ushort EventType;
-        public ushort Padding;
-        public KEY_EVENT_RECORD KeyEvent;
+    public struct MOUSEINPUT {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct INPUT {
+        public uint type;
+        public INPUTUNION U;
     }
 }
 '@
@@ -98,67 +107,53 @@ function Invoke-WindowAction {
     }
 }
 
+# copy a single INPUT_RECORD-style SendInput key to a list
+function Add-Key {
+    param($List, [int]$Vk, [int]$Scan, [int]$Flags)
+    $union = New-Object PetWin+INPUTUNION
+    $ki = New-Object PetWin+KEYBDINPUT
+    $ki.wVk = $Vk
+    $ki.wScan = $Scan
+    $ki.dwFlags = $Flags
+    $ki.dwExtraInfo = [IntPtr]::Zero
+    $union.ki = $ki
+    $in = New-Object PetWin+INPUT
+    $in.type = 1
+    $in.U = $union
+    $List.Add($in) | Out-Null
+}
+
 function Send-TextToConsole {
     param([int]$Target, [string]$Text)
     if ($Text.Length -eq 0) { return }
-    # attach to the target's console (retry a few times - can be flaky right after spawn)
-    [PetWin]::FreeConsole() | Out-Null
-    $attached = $false
-    for ($i = 0; $i -lt 3 -and -not $attached; $i++) {
-        $attached = [PetWin]::AttachConsole([uint32]$Target)
-        if (-not $attached) { Start-Sleep -Milliseconds 150 }
+    $result = 'clipboard'   # fallback: text is on the clipboard, user pastes manually
+    # 1) copy text to clipboard (reliable Unicode transport incl. CJK)
+    try { [System.Windows.Forms.Clipboard]::SetText($Text) } catch {}
+
+    $hwnd = Get-ConsoleWindowHandle -Target $Target
+    if ($hwnd -eq [IntPtr]::Zero) { Set-Content (Join-Path $PSScriptRoot 'send.result') $result; return }
+
+    # 2) focus the terminal (temporarily disable the foreground-lock timeout)
+    $old = [IntPtr]::Zero
+    [PetWin]::SystemParametersInfo(0x2000, 0, $old, 0) | Out-Null   # SPI_GETFOREGROUNDLOCKTIMEOUT
+    [PetWin]::SystemParametersInfo(0x2001, 0, [IntPtr]::Zero, 0) | Out-Null  # SPI_SET -> 0
+    [PetWin]::ShowWindow($hwnd, 9) | Out-Null
+    [PetWin]::SetForegroundWindow($hwnd) | Out-Null
+    Start-Sleep -Milliseconds 150
+    [PetWin]::SystemParametersInfo(0x2001, 0, $old, 0) | Out-Null   # restore timeout
+
+    if ([PetWin]::GetForegroundWindow() -eq $hwnd) {
+        # 3) paste via Ctrl+V (text is in the clipboard)
+        $list = New-Object 'System.Collections.Generic.List[PetWin+INPUT]'
+        Add-Key $list 0x11 0 0          # CTRL down
+        Add-Key $list 0x56 0 0          # V down
+        Add-Key $list 0x56 0 0x0002     # V up
+        Add-Key $list 0x11 0 0x0002     # CTRL up
+        $arr = $list.ToArray()
+        [PetWin]::SendInput([uint32]$arr.Length, $arr, [System.Runtime.InteropServices.Marshal]::SizeOf([PetWin+INPUT])) | Out-Null
+        $result = 'pasted'
     }
-    if (-not $attached) { return }
-    # AttachConsole does NOT redirect std handles -> open the attached console's input (CONIN$).
-    # GENERIC_READ|GENERIC_WRITE = 3221225472; FILE_SHARE_READ|WRITE = 3; OPEN_EXISTING = 3
-    $hIn = [PetWin]::CreateFile('CONIN$', [uint32]3221225472, [uint32]3, [IntPtr]::Zero, [uint32]3, [uint32]0, [IntPtr]::Zero)
-    if ($hIn -eq [IntPtr]::Zero -or $hIn -eq [IntPtr](-1)) { [PetWin]::FreeConsole() | Out-Null; return }
-    # disable ENABLE_QUICK_EDIT_MODE (0x40) so injected input is always processed
-    $mode = [uint32]0
-    if ([PetWin]::GetConsoleMode($hIn, [ref]$mode)) {
-        [PetWin]::SetConsoleMode($hIn, ($mode -band (-bnot 0x40))) | Out-Null
-    }
-    $records = New-Object 'System.Collections.Generic.List[PetWin+INPUT_RECORD]'
-    foreach ($ch in $Text.ToCharArray()) {
-        # For chars with a real key use its VK; for CJK/symbols (no VK) use VK_PACKET (0xE7)
-        # and put the UTF-16 code in wVirtualScanCode (same convention as SendInput).
-        $vk = [PetWin]::VkKeyScanW($ch)
-        if ($vk -eq -1) {
-            $code = 0xE7
-            $scan = [uint16][char]$ch
-        } else {
-            $code = $vk -band 0xFF
-            $scan = 0
-        }
-        foreach ($down in @($true, $false)) {
-            $ir = New-Object PetWin+INPUT_RECORD
-            $ir.EventType = 1  # KEY_EVENT
-            $ke = New-Object PetWin+KEY_EVENT_RECORD
-            $ke.bKeyDown = $down
-            $ke.wRepeatCount = 1
-            $ke.wVirtualKeyCode = $code
-            $ke.wVirtualScanCode = $scan
-            $ke.UnicodeChar = $ch
-            $ir.KeyEvent = $ke
-            $records.Add($ir) | Out-Null
-        }
-    }
-    # Enter (VK_RETURN = 13), key down + up
-    foreach ($down in @($true, $false)) {
-        $ir = New-Object PetWin+INPUT_RECORD
-        $ir.EventType = 1
-        $ke = New-Object PetWin+KEY_EVENT_RECORD
-        $ke.bKeyDown = $down
-        $ke.wRepeatCount = 1
-        $ke.wVirtualKeyCode = 13
-        $ke.UnicodeChar = [char]13
-        $ir.KeyEvent = $ke
-        $records.Add($ir) | Out-Null
-    }
-    $arr = $records.ToArray()
-    $written = [uint32]0
-    [PetWin]::WriteConsoleInput($hIn, $arr, [uint32]$arr.Length, [ref]$written) | Out-Null
-    [PetWin]::FreeConsole() | Out-Null
+    Set-Content (Join-Path $PSScriptRoot 'send.result') $result
 }
 
 switch ($Action) {

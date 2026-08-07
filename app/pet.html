@@ -343,7 +343,10 @@ async function sendMsg(){
       body: JSON.stringify({ text: v })
     });
     const j = await r.json();
-    if (j.ok){ msgInput.value = ''; toastMsg('已发送 → claude'); }
+    if (j.ok){
+      msgInput.value = '';
+      toastMsg(j.how === 'pasted' ? '已粘贴到终端' : (j.how === 'clipboard' ? '已复制，请在终端 Ctrl+V 粘贴' : '已发送 → claude'));
+    }
     else toastMsg(j.reason || '发送失败');
   }catch(e){ toastMsg('发送失败'); }
 }

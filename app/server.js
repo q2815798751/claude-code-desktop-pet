@@ -14,6 +14,7 @@ const HTML_FILE = path.join(ROOT, 'pet.html');
 const PS_FILE = path.join(ROOT, 'pet.ps1');
 const TERM_PID_FILE = path.join(ROOT, 'term.pid');
 const SEND_FILE = path.join(ROOT, 'send.txt');
+const SEND_RESULT_FILE = path.join(ROOT, 'send.result');
 const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 
 const PORT = 9876;
@@ -317,6 +318,14 @@ function psRun(action, pid) {
   });
 }
 
+function psRunP(action, pid) {
+  return new Promise((resolve) => {
+    const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', PS_FILE, '-Action', action];
+    if (pid) args.push('-ProcId', String(pid));
+    execFile('powershell.exe', args, { windowsHide: true }, () => resolve());
+  });
+}
+
 // ---- poll loop ----
 function killPetEdge() {
   execFile('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
@@ -433,8 +442,12 @@ const server = http.createServer((req, res) => {
         if (!claudeAlive || !termAlive) return json(res, { ok: false, reason: 'claude 未运行' });
         if (state !== 'idle' && state !== 'done') return json(res, { ok: false, reason: 'claude 工作中，请等待' });
         try { fs.writeFileSync(SEND_FILE, text, 'utf8'); } catch { return json(res, { ok: false, reason: '写入失败' }); }
-        psRun('send', termPid);
-        return json(res, { ok: true });
+        try { fs.unlinkSync(SEND_RESULT_FILE); } catch {}
+        psRunP('send', termPid).then(() => {
+          let how = 'sent';
+          try { how = fs.readFileSync(SEND_RESULT_FILE, 'utf8').trim() || 'sent'; fs.unlinkSync(SEND_RESULT_FILE); } catch {}
+          return json(res, { ok: true, how });
+        });
       });
       return;
     }

@@ -4,7 +4,7 @@
 
 ## v1.0.2 (2026-08-03)
 - **feat 终端按钮合并**："焦点"+"收起/打开"合并为一个"终端"按钮：点一下终端最小化，再点还原并置前（`pet.ps1` 用 `IsIconic` 判断状态后切换）。双击桌宠仍为聚焦。
-- **feat 底部对话 + 文本输入**：桌宠底部新增对话面板（小字体、可折叠、自动滚动）显示最近对话，以及输入条可**发送文本到 claude**（回车或点"发送"）。服务端 `WriteConsoleInput` 把文本（含中文）注入终端控制台输入缓冲，等效键盘输入、无需抢焦点；仅当 claude 空闲时允许发送，忙碌/离线会 toast 提示。
+- **feat 底部对话 + 文本输入**：桌宠底部新增对话面板（小字体、可折叠、自动滚动）显示最近对话，以及输入条可**发送文本到 claude**（回车或点"发送"）。发送走 **剪贴板 + 自动粘贴**（`Set-Clipboard` 保真 Unicode/中文 → 尝试聚焦终端 → `SendInput Ctrl+V`；聚焦失败则文本已在剪贴板，提示手动 Ctrl+V）。`WriteConsoleInput` 注入曾尝试但中文在 claude 的 VT 输入模式下必乱码，`SendInput` 打字又受 Windows 前台锁定限制，故采用剪贴板方案。仅当 claude 空闲时允许发送，忙碌/离线会 toast 提示；`/api/send` 返回 `how: pasted|clipboard` 供客户端提示。
 - **feat 窗口横向缩放**：`#shell` 改流式（`width:100%; min-width:320px`），Edge 窗口可拖拽缩放；桌宠与动态圆环始终保持居中并按 `--pet-size` 自适应（封顶防模糊）；主题配色任意宽度下正常。
 - 新增 API：`GET /api/conv`（最近对话）、`POST /api/send`（发送）；`/api/terminal?act=toggle`。
 - `docs/CONFIG.md` 补充新按钮/API/对话说明。
