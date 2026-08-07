@@ -12,7 +12,11 @@
 - **"现在在做什么"**：面板实时显示 claude 当前动作；长任务完成/报错有提示音提醒。
 - **即装即用**：`install.bat` 一键安装，`start-both.bat` 同时拉起 claude 终端和悬浮球。
 
-![运行演示](docs/pet-demo.gif)
+![悬浮球演示](docs/pet-demo.gif)
+*悬浮球形态：可拖动 · 左键/悬停展开 · 右键气泡菜单 · 透明度/置顶可调*
+
+![全面板演示](docs/pet-panel.gif)
+*全面板：状态与进度 · "现在在做什么" · 主题 / 字号 / 终端 / 退出*
 
 ![设计参考](docs/design-reference.png)
 
