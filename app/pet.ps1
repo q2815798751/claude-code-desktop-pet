@@ -109,8 +109,7 @@ function Send-TextToConsole {
         if (-not $attached) { Start-Sleep -Milliseconds 150 }
     }
     if (-not $attached) { return }
-    # AttachConsole does NOT redirect the standard handles, so open the attached
-    # console's input device explicitly (CONIN$) instead of GetStdHandle.
+    # AttachConsole does NOT redirect std handles -> open the attached console's input (CONIN$).
     # GENERIC_READ|GENERIC_WRITE = 3221225472; FILE_SHARE_READ|WRITE = 3; OPEN_EXISTING = 3
     $hIn = [PetWin]::CreateFile('CONIN$', [uint32]3221225472, [uint32]3, [IntPtr]::Zero, [uint32]3, [uint32]0, [IntPtr]::Zero)
     if ($hIn -eq [IntPtr]::Zero -or $hIn -eq [IntPtr](-1)) { [PetWin]::FreeConsole() | Out-Null; return }
@@ -121,16 +120,16 @@ function Send-TextToConsole {
     }
     $records = New-Object 'System.Collections.Generic.List[PetWin+INPUT_RECORD]'
     foreach ($ch in $Text.ToCharArray()) {
-        # proper virtual key + shift state where one exists; VK_PACKET (0xE7) for
-        # chars with no key (CJK etc.). UnicodeChar carries the actual character,
-        # which raw readers (claude's TUI) use directly.
+        # For chars with a real key use its VK; for CJK/symbols (no VK) use VK_PACKET (0xE7)
+        # and put the UTF-16 code in wVirtualScanCode (same convention as SendInput).
         $vk = [PetWin]::VkKeyScanW($ch)
-        $code = if ($vk -eq -1) { 0xE7 } else { $vk -band 0xFF }
-        $sh = ($vk -shr 8) -band 0xFF
-        $ctrl = 0
-        if ($sh -band 1) { $ctrl = $ctrl -bor 0x10 }  # SHIFT_PRESSED
-        if ($sh -band 2) { $ctrl = $ctrl -bor 0x08 }  # LEFT_CTRL_PRESSED
-        if ($sh -band 4) { $ctrl = $ctrl -bor 0x02 }  # LEFT_ALT_PRESSED
+        if ($vk -eq -1) {
+            $code = 0xE7
+            $scan = [uint16][char]$ch
+        } else {
+            $code = $vk -band 0xFF
+            $scan = 0
+        }
         foreach ($down in @($true, $false)) {
             $ir = New-Object PetWin+INPUT_RECORD
             $ir.EventType = 1  # KEY_EVENT
@@ -138,8 +137,8 @@ function Send-TextToConsole {
             $ke.bKeyDown = $down
             $ke.wRepeatCount = 1
             $ke.wVirtualKeyCode = $code
+            $ke.wVirtualScanCode = $scan
             $ke.UnicodeChar = $ch
-            $ke.dwControlKeyState = $ctrl
             $ir.KeyEvent = $ke
             $records.Add($ir) | Out-Null
         }
