@@ -8,31 +8,45 @@
 :root,
 html[data-theme="cyber"]{
   --bg1:#04060d; --bg2:#0a0f1c; --bg-body:transparent;
-  --txt:#cfe9ff; --dim:#5f7290;
+  --txt:#b9dcff; --dim:#5f7290;
   --ac:#00f0ff;  --ac-rgb:0,240,255;
   --ac2:#ff00e5; --ac2-rgb:255,0,229;
   --scan:255,255,255;
 }
 html[data-theme="paper"]{
   --bg1:#fafaf7; --bg2:#efefe9; --bg-body:transparent;
-  --txt:#1c1c1a; --dim:#8d8d86;
+  --txt:#11110f; --dim:#8d8d86;
   --ac:#4a4a48;  --ac-rgb:74,74,72;
   --ac2:#b8894a; --ac2-rgb:184,137,74;
   --scan:0,0,0;
 }
 html[data-theme="matrix"]{
   --bg1:#001100; --bg2:#001b00; --bg-body:transparent;
-  --txt:#b9ffc4; --dim:#3f8f4f;
+  --txt:#a0efac; --dim:#3f8f4f;
   --ac:#00ff41;  --ac-rgb:0,255,65;
   --ac2:#00c42e; --ac2-rgb:0,196,46;
   --scan:0,255,65;
 }
 html[data-theme="gold"]{
   --bg1:#000000; --bg2:#0e0b06; --bg-body:transparent;
-  --txt:#f3e9cd; --dim:#7d7056;
+  --txt:#eadbb2; --dim:#7d7056;
   --ac:#ffd166;  --ac-rgb:255,209,102;
   --ac2:#b58a2f; --ac2-rgb:181,138,47;
   --scan:255,209,102;
+}
+html[data-theme="sunset"]{            /* 落日橙 */
+  --bg1:#1c0b2b; --bg2:#33102f; --bg-body:transparent;
+  --txt:#ffe7d2; --dim:#9a7a86;
+  --ac:#ff6b35;  --ac-rgb:255,107,53;
+  --ac2:#ff2e88; --ac2-rgb:255,46,136;
+  --scan:255,107,53;
+}
+html[data-theme="ocean"]{             /* 深海蓝 */
+  --bg1:#00121c; --bg2:#00293a; --bg-body:transparent;
+  --txt:#c4f2ff; --dim:#5a8a9a;
+  --ac:#00e5ff;  --ac-rgb:0,229,255;
+  --ac2:#00ffb3; --ac2-rgb:0,255,179;
+  --scan:0,229,255;
 }
 :root{ --fs:1; --st:#00f0ff; }
 
@@ -59,7 +73,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:transparent;   /* tr
 .ball-pet{position:relative;width:102px;height:102px;object-fit:contain;
   filter:drop-shadow(0 0 10px rgba(var(--ac-rgb),.35))}
 .ball-status{position:absolute;top:8px;left:0;right:0;text-align:center;pointer-events:none;
-  font-size:calc(11px * var(--fs));letter-spacing:2px;color:var(--st);
+  font-size:calc(11px * var(--fs));font-weight:600;letter-spacing:2px;color:var(--st);
   text-shadow:0 0 8px var(--st),0 0 16px var(--st)}
 
 /* bubble menu */
@@ -68,7 +82,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:transparent;   /* tr
 .bubble{position:fixed;width:46px;height:46px;border-radius:50%;
   display:flex;align-items:center;justify-content:center;cursor:pointer;
   background:rgba(var(--ac-rgb),.13);border:1px solid rgba(var(--ac-rgb),.5);
-  color:var(--txt);font-size:calc(9px*var(--fs));letter-spacing:1px;white-space:nowrap;
+  color:var(--txt);font-size:calc(9px*var(--fs));font-weight:600;letter-spacing:1px;white-space:nowrap;
   transition:transform .16s ease;box-shadow:0 0 8px rgba(var(--ac-rgb),.25)}
 .bubble:hover{background:rgba(var(--ac-rgb),.28)}
 .bubble.bad{border-color:#ff3b3b;color:#ff6b6b}
@@ -97,7 +111,7 @@ body.mode-panel #ball{display:none}
 .led{width:8px;height:8px;border-radius:50%;background:var(--st);flex:none;
   box-shadow:0 0 8px var(--st);animation:blink 1.2s steps(1) infinite}
 @keyframes blink{50%{opacity:.25}}
-.title{font-size:calc(10px * var(--fs));letter-spacing:2px;color:var(--dim);white-space:nowrap;overflow:hidden}
+.title{font-size:calc(10px * var(--fs));font-weight:600;letter-spacing:2px;color:var(--dim);white-space:nowrap;overflow:hidden}
 .title b{color:var(--st)}
 .clock{margin-left:auto;font-size:calc(10px * var(--fs));color:var(--dim)}
 .mini{font-family:inherit;font-size:calc(11px*var(--fs));width:calc(15px*var(--fs));height:calc(15px*var(--fs));
@@ -123,16 +137,16 @@ body.mode-panel #ball{display:none}
   filter:drop-shadow(0 0 14px rgba(var(--ac-rgb),.22))}
 #pet.dim{opacity:.6}
 
-.nowbar{flex:none;display:flex;gap:6px;margin-top:4px;font-size:calc(9px*var(--fs));color:var(--dim);
+.nowbar{flex:none;display:flex;gap:6px;margin-top:4px;font-size:calc(9px*var(--fs));font-weight:600;color:var(--dim);
   border:1px solid rgba(var(--ac-rgb),.18);background:rgba(var(--ac-rgb),.04);padding:2px 6px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .nowbar b{color:var(--st);font-weight:400}
 
 .footer{flex:none;margin-top:5px}
-.meta{display:flex;justify-content:space-between;font-size:calc(9px * var(--fs));color:var(--dim);margin-bottom:5px}
+.meta{display:flex;justify-content:space-between;font-size:calc(9px * var(--fs));font-weight:600;color:var(--dim);margin-bottom:5px}
 .meta b{color:var(--st);font-weight:400}
 .btns{display:flex;gap:4px}
-.btn{flex:1;font-family:inherit;font-size:calc(9px * var(--fs));letter-spacing:1px;color:var(--txt);
+.btn{flex:1;font-family:inherit;font-size:calc(9px * var(--fs));font-weight:600;letter-spacing:1px;color:var(--txt);
   background:rgba(var(--ac-rgb),.05);border:1px solid rgba(var(--ac-rgb),.28);padding:calc(4px * var(--fs)) 0;
   cursor:pointer;text-align:center;transition:all .15s}
 .btn:hover{background:rgba(var(--ac-rgb),.18)}
@@ -192,10 +206,12 @@ const STATE_COLORS = {
   paper:  { thinking:'#2a6f97', working:'#2e7d32', working_long:'#b8860b', done:'#8e44ad', idle:'#7f8c8d', offline:'#c0392b', error:'#c0392b' },
   matrix: { thinking:'#00ff41', working:'#39ff9b', working_long:'#aaff00', done:'#00e5ff', idle:'#4fbf6f', offline:'#ff2a2a', error:'#ff2a2a' },
   gold:   { thinking:'#ffd166', working:'#ffb703', working_long:'#fb8500', done:'#e9c46a', idle:'#a58a5a', offline:'#ff6b6b', error:'#ff6b6b' },
+  sunset: { thinking:'#ff6b35', working:'#ffb347', working_long:'#ff8c42', done:'#ff2e88', idle:'#c08a9a', offline:'#ff5a5a', error:'#ff4d4d' },
+  ocean:  { thinking:'#00e5ff', working:'#00ffb3', working_long:'#40c4ff', done:'#7c4dff', idle:'#5a9aa8', offline:'#ff5a5a', error:'#ff4d4d' },
 };
 const CN = { thinking:'思考中', working:'工作中', working_long:'长任务', done:'完成', idle:'待命', offline:'离线', error:'异常' };
-const THEMES = ['cyber','paper','matrix','gold'];
-const THEME_NAMES = { cyber:'CYBER', paper:'PAPER', matrix:'MATRIX', gold:'GOLD' };
+const THEMES = ['cyber','paper','matrix','gold','sunset','ocean'];
+const THEME_NAMES = { cyber:'CYBER', paper:'PAPER', matrix:'MATRIX', gold:'GOLD', sunset:'SUNSET', ocean:'OCEAN' };
 const FS_MIN = 0.85, FS_MAX = 1.35;
 const BALL_W = 150, BALL_H = 170, PANEL_W = 320, PANEL_H = 480;
 
