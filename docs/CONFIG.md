@@ -49,11 +49,25 @@
 | `GET /api/window` | `1` / `0`（桌宠窗是否存活，幂等判断用） |
 | `POST /api/open` | 重新打开桌宠窗 |
 | `POST /api/focus` | 激活 claude 终端 |
-| `POST /api/terminal?act=min\|restore` | 最小化 / 还原终端 |
+| `POST /api/terminal?act=toggle\|min\|restore` | 终端切换（最小化⇄还原置前）/ 最小化 / 还原 |
 | `POST /api/debug?state=X` | 强制状态 `X`（`auto` 恢复自动） |
 | `POST /api/debug?cycle=1` | 在 `auto→thinking→working→working_long→done→idle→offline→error` 间循环 |
+| `GET /api/conv` | 最近对话 `{msgs:[{role,text}]}`（用户输入 + AI 文本回复） |
+| `POST /api/send {text}` | 发送文本到 claude（仅空闲/完成时；写 `app/send.txt` → `pet.ps1 send` → WriteConsoleInput 注入终端） |
 | `POST /api/exit` | 关闭桌宠并退出服务（终端不动） |
 | `GET /gifs/<file>` | 状态 GIF |
+
+## 交互
+- 按钮行：**终端 | 主题 | 调试 | 退出**
+  - `终端`：点一下最小化终端，再点还原并置前（合并了原"焦点/收起"）；双击桌宠 = 仅聚焦。
+  - `主题`：循环 4 套主题（`T` 键同效）。
+  - `调试`：循环强制各状态验 GIF。
+  - `退出`：关闭桌宠与服务。
+- **对话面板**：底部小字体显示最近对话，点"▾ 对话"可折叠；每 2s 自动刷新。
+- **输入条**：输入后回车或点"发送"把内容发给 claude；claude 忙碌/离线时会被拒绝并提示。
+
+## 窗口缩放
+`#shell` 为流式宽度（`min-width:320px`），Edge 窗口可**横向拖拽缩放**；桌宠与圆环始终居中，尺寸按 `--pet-size` 自适应（封顶防 GIF 拉伸），主题配色任意宽度正常。窗口位置/初始尺寸见 `app/pet.ps1` 的 `Open-EdgeWindow`。
 
 ## GIF 与配色
 GIF 映射与霓虹配色在 `app/pet.html` 顶部：

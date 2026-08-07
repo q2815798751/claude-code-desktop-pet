@@ -2,6 +2,13 @@
 
 本文件记录 ClaudePet 的每次功能与修复改动。
 
+## v1.0.2 (2026-08-03)
+- **feat 终端按钮合并**："焦点"+"收起/打开"合并为一个"终端"按钮：点一下终端最小化，再点还原并置前（`pet.ps1` 用 `IsIconic` 判断状态后切换）。双击桌宠仍为聚焦。
+- **feat 底部对话 + 文本输入**：桌宠底部新增对话面板（小字体、可折叠、自动滚动）显示最近对话，以及输入条可**发送文本到 claude**（回车或点"发送"）。服务端 `WriteConsoleInput` 把文本（含中文）注入终端控制台输入缓冲，等效键盘输入、无需抢焦点；仅当 claude 空闲时允许发送，忙碌/离线会 toast 提示。
+- **feat 窗口横向缩放**：`#shell` 改流式（`width:100%; min-width:320px`），Edge 窗口可拖拽缩放；桌宠与动态圆环始终保持居中并按 `--pet-size` 自适应（封顶防模糊）；主题配色任意宽度下正常。
+- 新增 API：`GET /api/conv`（最近对话）、`POST /api/send`（发送）；`/api/terminal?act=toggle`。
+- `docs/CONFIG.md` 补充新按钮/API/对话说明。
+
 ## v1.0.1 (2026-08-03)
 - **fix 状态推断**：不再依赖转录文件 mtime（流式输出期间不写转录，导致误判 idle / 结束后延迟 25s 才变 idle）。改为读取**最新转录的最后一条有意义消息并按内容分类**：`user输入 / tool_result / thinking / tool_use` → working（回合中）；`assistant 纯text` → done(5s) → idle；回合时长驱动 thinking/working/working_long。见 `app/server.js` 的 `classifyMessage` / `readLastMessage`。
 - **feat 主题功能**：新增 4 套主题 —— `cyber`(赛博霓虹,默认) / `paper`(极简白) / `matrix`(终端绿) / `gold`(暗金OLED)。新增"主题"按钮 + 键盘 `T` 循环切换，`localStorage` 持久化，标题栏显示当前主题名，各主题独立状态配色。见 `app/pet.html`。

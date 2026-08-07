@@ -13,6 +13,7 @@ const ROOT = __dirname;
 const HTML_FILE = path.join(ROOT, 'pet.html');
 const PS_FILE = path.join(ROOT, 'pet.ps1');
 const TERM_PID_FILE = path.join(ROOT, 'term.pid');
+const SEND_FILE = path.join(ROOT, 'send.txt');
 const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 
 const PORT = 9876;
@@ -121,6 +122,43 @@ function scanRecentError(now) {
     }
   } catch {}
   return null;
+}
+
+// Read the recent conversation (user inputs + assistant text replies) from the
+// newest transcript tail, oldest -> newest. Tool calls are collapsed to nothing.
+function readRecentConv(max = 8) {
+  const file = newestTranscriptPath();
+  if (!file) return [];
+  try {
+    const size = fs.statSync(file).size;
+    if (size === 0) return [];
+    const start = Math.max(0, size - 256 * 1024);
+    const fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(size - start);
+    try { fs.readSync(fd, buf, 0, buf.length, start); } finally { fs.closeSync(fd); }
+    const lines = buf.toString('utf8').split('\n');
+    const out = [];
+    for (let i = lines.length - 1; i >= 0 && out.length < max; i--) {
+      const line = lines[i].trim();
+      if (!line.startsWith('{')) continue;
+      let o;
+      try { o = JSON.parse(line); } catch { continue; }
+      const t = o.type || '';
+      const content = o.message && o.message.content;
+      if (!Array.isArray(content)) continue;
+      if (t === 'user') {
+        // user input only (not tool_result)
+        const hasToolResult = content.some((c) => c && c.type === 'tool_result');
+        if (hasToolResult) continue;
+        const text = content.filter((c) => c && c.type === 'text').map((c) => c.text || '').join(' ').trim();
+        if (text) out.unshift({ role: 'user', text: text.slice(0, 200) });
+      } else if (t === 'assistant') {
+        const text = content.filter((c) => c && c.type === 'text').map((c) => c.text || '').join(' ').trim();
+        if (text) out.unshift({ role: 'assistant', text: text.slice(0, 200) });
+      }
+    }
+    return out;
+  } catch { return []; }
 }
 
 // ---- process checks (spawn tasklist, cached every PROC_CHECK_MS) ----
@@ -379,9 +417,26 @@ const server = http.createServer((req, res) => {
       return json(res, { ok: true });
     }
     if (req.method === 'POST' && p === '/api/terminal') {
-      const act = q.get('act') === 'restore' ? 'restore' : 'min';
+      const a = q.get('act');
+      const act = (a === 'restore' || a === 'toggle') ? a : 'min';
       psRun(act, termPid);
       return json(res, { ok: true });
+    }
+    if (req.method === 'GET' && p === '/api/conv') return json(res, { msgs: readRecentConv() });
+    if (req.method === 'POST' && p === '/api/send') {
+      let body = '';
+      req.on('data', (c) => { body += c; if (body.length > 4096) req.destroy(); });
+      req.on('end', () => {
+        let text = '';
+        try { text = String(JSON.parse(body || '{}').text || '').trim(); } catch {}
+        if (!text) return json(res, { ok: false, reason: 'empty' });
+        if (!claudeAlive || !termAlive) return json(res, { ok: false, reason: 'claude 未运行' });
+        if (state !== 'idle' && state !== 'done') return json(res, { ok: false, reason: 'claude 工作中，请等待' });
+        try { fs.writeFileSync(SEND_FILE, text, 'utf8'); } catch { return json(res, { ok: false, reason: '写入失败' }); }
+        psRun('send', termPid);
+        return json(res, { ok: true });
+      });
+      return;
     }
     if (req.method === 'POST' && p === '/api/debug') {
       if (q.has('cycle')) {

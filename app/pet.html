@@ -40,7 +40,7 @@ html[data-theme="gold"]{              /* 暗金 OLED */
 html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-body);
   font-family:'Cascadia Code','Cascadia Mono',Consolas,'Microsoft YaHei',monospace;
   color:var(--txt);transition:background .25s}
-#shell{width:320px;height:100%;min-height:430px;position:relative;display:flex;flex-direction:column;
+#shell{width:100%;min-width:320px;height:100%;min-height:430px;position:relative;display:flex;flex-direction:column;
   background:
     radial-gradient(120% 90% at 50% 0%, rgba(var(--ac-rgb),.10), transparent 55%),
     radial-gradient(90% 60% at 80% 100%, rgba(var(--ac2-rgb),.07), transparent 60%),
@@ -81,23 +81,46 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-body);
 .bar u{position:absolute;right:0;top:-1px;font-size:8px;color:var(--dim);
   letter-spacing:1px;padding-right:1px}
 
-/* pet stage */
-.stage{flex:1;position:relative;display:flex;align-items:center;justify-content:center;min-height:0}
-.ring{position:absolute;width:268px;height:268px;border-radius:50%;
+/* pet stage — always centered, scales a bit with window width */
+:root{--pet-size:clamp(170px, min(54%, 224px), 224px)}
+.stage{flex:1;min-height:110px;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.ring{position:absolute;width:calc(var(--pet-size) * 1.12);height:calc(var(--pet-size) * 1.12);border-radius:50%;
   border:1px solid rgba(var(--ac-rgb),.16);
   box-shadow:0 0 30px rgba(var(--ac-rgb),.10), inset 0 0 24px rgba(var(--ac-rgb),.05);
   animation:spin 14s linear infinite;pointer-events:none}
 @keyframes spin{to{transform:rotate(360deg)}}
 .ring::before{content:'';position:absolute;top:-2px;left:50%;width:8px;height:4px;
   background:var(--st);box-shadow:0 0 8px var(--st);transform:translateX(-50%)}
-#pet{position:relative;width:252px;height:252px;object-fit:contain;cursor:pointer;
+#pet{position:relative;width:var(--pet-size);height:var(--pet-size);object-fit:contain;cursor:pointer;
   filter:drop-shadow(0 0 14px rgba(var(--ac-rgb),.22))}
 #pet.dim{opacity:.75}
 
+/* conversation panel */
+.conv{flex:none;display:flex;flex-direction:column;margin-top:4px;
+  border:1px solid rgba(var(--ac-rgb),.25);background:rgba(var(--ac-rgb),.04)}
+.conv.hide{display:none}
+.conv-head{font-size:8px;letter-spacing:1px;color:var(--dim);padding:2px 6px;cursor:pointer;
+  display:flex;justify-content:space-between;align-items:center}
+.conv-body{max-height:58px;overflow-y:auto;font-size:9px;line-height:1.35;padding:2px 6px;
+  color:var(--txt);user-select:text;-webkit-user-select:text}
+.conv-body .m{word-break:break-all;margin:1px 0}
+.conv-body .u{color:var(--ac)}
+.conv-body .a{color:var(--dim)}
+
+/* input bar */
+.inputbar{flex:none;display:flex;gap:4px;margin-top:4px}
+#msg{flex:1;min-width:0;font-family:inherit;font-size:10px;color:var(--txt);
+  background:rgba(var(--ac-rgb),.06);border:1px solid rgba(var(--ac-rgb),.3);
+  padding:3px 6px;outline:none;user-select:text;-webkit-user-select:text}
+#msg::placeholder{color:var(--dim)}
+#bSend{flex:none;font-family:inherit;font-size:10px;letter-spacing:1px;color:var(--txt);
+  background:rgba(var(--ac-rgb),.1);border:1px solid rgba(var(--ac-rgb),.35);padding:3px 8px;cursor:pointer}
+#bSend:hover{background:rgba(var(--ac-rgb),.22)}
+
 /* footer */
-.footer{flex:none;margin-top:6px}
+.footer{flex:none;margin-top:5px}
 .meta{display:flex;justify-content:space-between;font-size:9px;color:var(--dim);
-  letter-spacing:1px;margin-bottom:6px}
+  letter-spacing:1px;margin-bottom:5px}
 .meta b{color:var(--st);font-weight:400}
 .btns{display:flex;gap:4px}
 .btn{flex:1;font-family:inherit;font-size:9px;letter-spacing:1px;color:var(--txt);
@@ -105,7 +128,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-body);
   cursor:pointer;text-align:center;transition:all .15s}
 .btn:hover{background:rgba(var(--ac-rgb),.18);color:var(--txt);box-shadow:0 0 10px rgba(var(--ac-rgb),.4)}
 .btn.bad:hover{background:rgba(255,59,59,.2);border-color:#ff3b3b;box-shadow:0 0 10px rgba(255,59,59,.4)}
-#toast{position:absolute;left:50%;bottom:74px;transform:translateX(-50%);
+#toast{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);
   font-size:9px;letter-spacing:2px;color:var(--bg1);background:var(--st);
   padding:2px 8px;opacity:0;transition:opacity .2s;white-space:nowrap;pointer-events:none;
   box-shadow:0 0 12px var(--st);z-index:5}
@@ -133,6 +156,16 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-body);
     <img id="pet" alt="pet" draggable="false">
   </div>
 
+  <div class="conv" id="conv">
+    <div class="conv-head" id="convHead"><span>▾ 对话</span><span id="convCnt"></span></div>
+    <div class="conv-body" id="convBody"></div>
+  </div>
+
+  <div class="inputbar">
+    <input id="msg" type="text" placeholder="发送给 claude…" autocomplete="off">
+    <button id="bSend" class="btn">发送</button>
+  </div>
+
   <div class="footer">
     <div class="meta">
       <span>CLI <b id="cli">?</b></span>
@@ -141,8 +174,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-body);
     </div>
     <div class="btns">
       <button class="btn" id="bTheme">主题</button>
-      <button class="btn" id="bFocus">焦点</button>
-      <button class="btn" id="bTerm">收起</button>
+      <button class="btn" id="bTerm">终端</button>
       <button class="btn" id="bDebug">调试</button>
       <button class="btn bad" id="bExit">退出</button>
     </div>
@@ -189,11 +221,17 @@ const termEl = document.getElementById('term');
 const forcedTag = document.getElementById('forcedTag');
 const titleTxt = document.getElementById('titleTxt');
 const toast = document.getElementById('toast');
+const conv = document.getElementById('conv');
+const convHead = document.getElementById('convHead');
+const convBody = document.getElementById('convBody');
+const convCnt = document.getElementById('convCnt');
+const msgInput = document.getElementById('msg');
 
 let lastGifState = null;
 let bust = 0;
 let lastState = null;
 let theme = 'cyber';
+let lastConvKey = '';
 
 function setVar(name, val){ document.documentElement.style.setProperty(name, val); }
 
@@ -264,7 +302,6 @@ async function poll(){
     if (j.shutdown){ window.close(); return; }
     render(j);
   }catch(e){
-    // server gone -> close the pet window
     try{ window.close(); }catch(_){}
   }
 }
@@ -273,24 +310,67 @@ function api(path){
   return fetch(path, {method:'POST'}).catch(()=>{});
 }
 
+// ---- conversation ----
+function renderConv(msgs){
+  const key = JSON.stringify(msgs);
+  if (key === lastConvKey) return;
+  lastConvKey = key;
+  convBody.innerHTML = '';
+  for (const m of msgs){
+    const d = document.createElement('div');
+    d.className = 'm ' + (m.role === 'user' ? 'u' : 'a');
+    d.textContent = (m.role === 'user' ? '你 › ' : 'AI › ') + m.text;
+    convBody.appendChild(d);
+  }
+  convCnt.textContent = msgs.length ? msgs.length + ' 条' : '';
+  convBody.scrollTop = convBody.scrollHeight;
+}
+
+async function pollConv(){
+  try{
+    const r = await fetch('/api/conv', {cache:'no-store'});
+    const j = await r.json();
+    renderConv(j.msgs || []);
+  }catch(e){}
+}
+
+async function sendMsg(){
+  const v = msgInput.value.trim();
+  if (!v) return;
+  try{
+    const r = await fetch('/api/send', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ text: v })
+    });
+    const j = await r.json();
+    if (j.ok){ msgInput.value = ''; toastMsg('已发送 → claude'); }
+    else toastMsg(j.reason || '发送失败');
+  }catch(e){ toastMsg('发送失败'); }
+}
+
 // actions
 document.getElementById('bTheme').onclick = ()=>{ cycleTheme(); };
-document.getElementById('bFocus').onclick = ()=>{ api('/api/focus'); toastMsg('FOCUS'); };
-document.getElementById('bTerm').onclick = (e)=>{
-  const min = e.target.textContent === '收起';
-  api('/api/terminal?act=' + (min ? 'min' : 'restore'));
-  e.target.textContent = min ? '打开' : '收起';
-  toastMsg(min ? 'MIN' : 'RESTORE');
-};
+document.getElementById('bTerm').onclick = ()=>{ api('/api/terminal?act=toggle'); toastMsg('TERM TOGGLE'); };
 document.getElementById('bDebug').onclick = ()=>{
   api('/api/debug?cycle=1');
   toastMsg('DBG CYCLE');
 };
 document.getElementById('bExit').onclick = ()=>{ api('/api/exit'); };
+document.getElementById('bSend').onclick = ()=>{ sendMsg(); };
+
+convHead.onclick = ()=>{
+  const hidden = conv.classList.toggle('hide');
+  convHead.firstChild.textContent = hidden ? '▸ 对话' : '▾ 对话';
+};
+
+msgInput.addEventListener('keydown', (e)=>{
+  if (e.key === 'Enter'){ e.preventDefault(); sendMsg(); }
+});
 
 petImg.addEventListener('dblclick', ()=>{ api('/api/focus'); toastMsg('FOCUS TERM'); });
 
 document.addEventListener('keydown', (e)=>{
+  if (e.target === msgInput) return; // typing in the input
   if (e.key === 't' || e.key === 'T'){ cycleTheme(); }
   if (e.key === 'd' || e.key === 'D'){ api('/api/debug?cycle=1'); toastMsg('DBG'); }
   if (e.key === 'Escape'){ api('/api/exit'); }
@@ -310,6 +390,7 @@ document.addEventListener('keydown', (e)=>{
 
 setInterval(tick, 1000);
 setInterval(poll, 500);
+setInterval(pollConv, 2000);
 </script>
 </body>
 </html>
