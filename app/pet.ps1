@@ -7,8 +7,11 @@ Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 public class PetWin {
-    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]   public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")]   public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("kernel32.dll")] public static extern bool AttachConsole(uint dwProcessId);
+    [DllImport("kernel32.dll")] public static extern bool FreeConsole();
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
 }
 '@
 
@@ -39,12 +42,27 @@ function Open-EdgeWindow {
     Start-Process -FilePath $e -ArgumentList $edgeArgs
 }
 
+function Get-ConsoleWindowHandle {
+    param([int]$Target)
+    # Console processes (powershell/cmd started via Start-Process) report
+    # MainWindowHandle = 0, so attach to the target's console and read the
+    # real console window handle instead.
+    [PetWin]::FreeConsole() | Out-Null
+    if ([PetWin]::AttachConsole([uint32]$Target)) {
+        $h = [PetWin]::GetConsoleWindow()
+        [PetWin]::FreeConsole() | Out-Null
+        if ($h -ne [IntPtr]::Zero) { return $h }
+    }
+    # fallback: MainWindowHandle
+    $proc = Get-Process -Id $Target -ErrorAction SilentlyContinue
+    if ($proc) { return $proc.MainWindowHandle }
+    return [IntPtr]::Zero
+}
+
 function Invoke-WindowAction {
     param([string]$Action, [int]$Target)
     if ($Target -le 0) { return }
-    $proc = Get-Process -Id $Target -ErrorAction SilentlyContinue
-    if (-not $proc) { return }
-    $h = $proc.MainWindowHandle
+    $h = Get-ConsoleWindowHandle -Target $Target
     if ($h -eq [IntPtr]::Zero) { return }
     switch ($Action) {
         'min'     { [PetWin]::ShowWindow($h, 6) | Out-Null }

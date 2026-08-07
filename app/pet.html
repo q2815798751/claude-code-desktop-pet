@@ -1,30 +1,56 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="cyber">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=320,height=440">
 <title>CLAUDE.PET</title>
 <style>
-:root{
-  --bg1:#04060d; --bg2:#0a0f1c;
-  --cy:#00f0ff; --gr:#39ff14; --mg:#ff00e5; --am:#ffb000;
-  --rd:#ff3b3b; --dim:#5f7290; --txt:#cfe9ff; --st:#00f0ff;
+/* ============ themes ============ */
+:root,
+html[data-theme="cyber"]{            /* 赛博霓虹 (默认) */
+  --bg1:#04060d; --bg2:#0a0f1c; --bg-body:#04060d;
+  --txt:#cfe9ff; --dim:#5f7290;
+  --ac:#00f0ff;  --ac-rgb:0,240,255;
+  --ac2:#ff00e5; --ac2-rgb:255,0,229;
+  --scan:255,255,255;
 }
+html[data-theme="paper"]{             /* 极简白 */
+  --bg1:#fafaf7; --bg2:#efefe9; --bg-body:#f2f2ed;
+  --txt:#1c1c1a; --dim:#8d8d86;
+  --ac:#4a4a48;  --ac-rgb:74,74,72;
+  --ac2:#b8894a; --ac2-rgb:184,137,74;
+  --scan:0,0,0;
+}
+html[data-theme="matrix"]{            /* 终端绿 */
+  --bg1:#001100; --bg2:#001b00; --bg-body:#000800;
+  --txt:#b9ffc4; --dim:#3f8f4f;
+  --ac:#00ff41;  --ac-rgb:0,255,65;
+  --ac2:#00c42e; --ac2-rgb:0,196,46;
+  --scan:0,255,65;
+}
+html[data-theme="gold"]{              /* 暗金 OLED */
+  --bg1:#000000; --bg2:#0e0b06; --bg-body:#000000;
+  --txt:#f3e9cd; --dim:#7d7056;
+  --ac:#ffd166;  --ac-rgb:255,209,102;
+  --ac2:#b58a2f; --ac2-rgb:181,138,47;
+  --scan:255,209,102;
+}
+
 *{box-sizing:border-box;margin:0;padding:0;user-select:none;-webkit-user-select:none}
-html,body{width:100%;height:100%;overflow:hidden;background:#04060d;
+html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-body);
   font-family:'Cascadia Code','Cascadia Mono',Consolas,'Microsoft YaHei',monospace;
-  color:var(--txt)}
+  color:var(--txt);transition:background .25s}
 #shell{width:320px;height:100%;min-height:430px;position:relative;display:flex;flex-direction:column;
   background:
-    radial-gradient(120% 90% at 50% 0%, rgba(0,240,255,.10), transparent 55%),
-    radial-gradient(90% 60% at 80% 100%, rgba(255,0,229,.07), transparent 60%),
+    radial-gradient(120% 90% at 50% 0%, rgba(var(--ac-rgb),.10), transparent 55%),
+    radial-gradient(90% 60% at 80% 100%, rgba(var(--ac2-rgb),.07), transparent 60%),
     linear-gradient(160deg,var(--bg1),var(--bg2));
-  border:1px solid rgba(0,240,255,.35);
-  box-shadow:0 0 18px rgba(0,240,255,.18), inset 0 0 34px rgba(0,240,255,.06);
-  padding:7px 10px 9px}
+  border:1px solid rgba(var(--ac-rgb),.35);
+  box-shadow:0 0 18px rgba(var(--ac-rgb),.18), inset 0 0 34px rgba(var(--ac-rgb),.06);
+  padding:7px 10px 9px;transition:border-color .25s, box-shadow .25s}
 /* scanlines */
 #shell::after{content:'';position:absolute;inset:0;pointer-events:none;
-  background:repeating-linear-gradient(0deg,rgba(255,255,255,.03) 0 1px,transparent 1px 3px);
+  background:repeating-linear-gradient(0deg,rgba(var(--scan),.05) 0 1px,transparent 1px 3px);
   mix-blend-mode:overlay}
 /* corner brackets */
 .corner{position:absolute;width:11px;height:11px;border:1px solid var(--st);
@@ -48,8 +74,8 @@ html,body{width:100%;height:100%;overflow:hidden;background:#04060d;
 .stateline{font-size:17px;font-weight:700;letter-spacing:3px;color:var(--st);
   text-shadow:0 0 8px var(--st),0 0 22px var(--st);display:flex;align-items:baseline;gap:8px}
 .stateline .cn{font-size:9px;letter-spacing:1px;color:var(--dim);font-weight:400}
-.bar{flex:none;height:5px;margin-top:5px;position:relative;background:rgba(255,255,255,.05);
-  border:1px solid rgba(255,255,255,.08)}
+.bar{flex:none;height:5px;margin-top:5px;position:relative;background:rgba(var(--scan),.08);
+  border:1px solid rgba(var(--scan),.12)}
 .bar i{position:absolute;inset:0;width:0%;background:linear-gradient(90deg,var(--st),transparent);
   box-shadow:0 0 8px var(--st);transition:width .4s linear}
 .bar u{position:absolute;right:0;top:-1px;font-size:8px;color:var(--dim);
@@ -58,14 +84,14 @@ html,body{width:100%;height:100%;overflow:hidden;background:#04060d;
 /* pet stage */
 .stage{flex:1;position:relative;display:flex;align-items:center;justify-content:center;min-height:0}
 .ring{position:absolute;width:268px;height:268px;border-radius:50%;
-  border:1px solid rgba(0,240,255,.16);
-  box-shadow:0 0 30px rgba(0,240,255,.10), inset 0 0 24px rgba(0,240,255,.05);
+  border:1px solid rgba(var(--ac-rgb),.16);
+  box-shadow:0 0 30px rgba(var(--ac-rgb),.10), inset 0 0 24px rgba(var(--ac-rgb),.05);
   animation:spin 14s linear infinite;pointer-events:none}
 @keyframes spin{to{transform:rotate(360deg)}}
 .ring::before{content:'';position:absolute;top:-2px;left:50%;width:8px;height:4px;
   background:var(--st);box-shadow:0 0 8px var(--st);transform:translateX(-50%)}
 #pet{position:relative;width:252px;height:252px;object-fit:contain;cursor:pointer;
-  filter:drop-shadow(0 0 14px rgba(0,240,255,.22))}
+  filter:drop-shadow(0 0 14px rgba(var(--ac-rgb),.22))}
 #pet.dim{opacity:.75}
 
 /* footer */
@@ -73,14 +99,14 @@ html,body{width:100%;height:100%;overflow:hidden;background:#04060d;
 .meta{display:flex;justify-content:space-between;font-size:9px;color:var(--dim);
   letter-spacing:1px;margin-bottom:6px}
 .meta b{color:var(--st);font-weight:400}
-.btns{display:flex;gap:5px}
+.btns{display:flex;gap:4px}
 .btn{flex:1;font-family:inherit;font-size:9px;letter-spacing:1px;color:var(--txt);
-  background:rgba(0,240,255,.05);border:1px solid rgba(0,240,255,.28);padding:4px 0;
+  background:rgba(var(--ac-rgb),.05);border:1px solid rgba(var(--ac-rgb),.28);padding:4px 0;
   cursor:pointer;text-align:center;transition:all .15s}
-.btn:hover{background:rgba(0,240,255,.18);color:#fff;box-shadow:0 0 10px rgba(0,240,255,.4)}
-.btn.bad:hover{background:rgba(255,59,59,.2);border-color:var(--rd);box-shadow:0 0 10px rgba(255,59,59,.4)}
+.btn:hover{background:rgba(var(--ac-rgb),.18);color:var(--txt);box-shadow:0 0 10px rgba(var(--ac-rgb),.4)}
+.btn.bad:hover{background:rgba(255,59,59,.2);border-color:#ff3b3b;box-shadow:0 0 10px rgba(255,59,59,.4)}
 #toast{position:absolute;left:50%;bottom:74px;transform:translateX(-50%);
-  font-size:9px;letter-spacing:2px;color:#000;background:var(--st);
+  font-size:9px;letter-spacing:2px;color:var(--bg1);background:var(--st);
   padding:2px 8px;opacity:0;transition:opacity .2s;white-space:nowrap;pointer-events:none;
   box-shadow:0 0 12px var(--st);z-index:5}
 #toast.show{opacity:1}
@@ -93,7 +119,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#04060d;
 
   <div class="header">
     <span class="led" id="led"></span>
-    <span class="title"><b>C:\&gt;</b> CLAUDE.PET // MON</span>
+    <span class="title" id="titleTxt"><b>C:\&gt;</b> CLAUDE.PET // CYBER</span>
     <span class="clock" id="clock">--:--:--</span>
   </div>
 
@@ -114,6 +140,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#04060d;
       <span id="forcedTag"></span>
     </div>
     <div class="btns">
+      <button class="btn" id="bTheme">主题</button>
       <button class="btn" id="bFocus">焦点</button>
       <button class="btn" id="bTerm">收起</button>
       <button class="btn" id="bDebug">调试</button>
@@ -136,20 +163,19 @@ const GIFS = {
   offline: 'offlineandidle.gif',
   error: 'errorandwaityou.gif',
 };
-const COLORS = {
-  thinking: '#00f0ff',
-  working: '#39ff14',
-  working_long: '#ffb000',
-  done: '#ff00e5',
-  idle: '#8fa8c8',
-  offline: '#ff3b3b',
-  error: '#ff2a2a',
+// per-theme state colors
+const STATE_COLORS = {
+  cyber:  { thinking:'#00f0ff', working:'#39ff14', working_long:'#ffb000', done:'#ff00e5', idle:'#8fa8c8', offline:'#ff3b3b', error:'#ff2a2a' },
+  paper:  { thinking:'#2a6f97', working:'#2e7d32', working_long:'#b8860b', done:'#8e44ad', idle:'#7f8c8d', offline:'#c0392b', error:'#c0392b' },
+  matrix: { thinking:'#00ff41', working:'#39ff9b', working_long:'#aaff00', done:'#00e5ff', idle:'#4fbf6f', offline:'#ff2a2a', error:'#ff2a2a' },
+  gold:   { thinking:'#ffd166', working:'#ffb703', working_long:'#fb8500', done:'#e9c46a', idle:'#a58a5a', offline:'#ff6b6b', error:'#ff6b6b' },
 };
 const CN = {
   thinking: '思考中', working: '工作中', working_long: '长任务',
   done: '完成', idle: '待命', offline: '离线', error: '异常',
 };
-const STATE_ORDER = ['thinking','working','working_long','done','idle','offline','error'];
+const THEMES = ['cyber', 'paper', 'matrix', 'gold'];
+const THEME_NAMES = { cyber: 'CYBER', paper: 'PAPER', matrix: 'MATRIX', gold: 'GOLD' };
 
 const petImg = document.getElementById('pet');
 const led = document.getElementById('led');
@@ -161,11 +187,13 @@ const clockEl = document.getElementById('clock');
 const cliEl = document.getElementById('cli');
 const termEl = document.getElementById('term');
 const forcedTag = document.getElementById('forcedTag');
+const titleTxt = document.getElementById('titleTxt');
 const toast = document.getElementById('toast');
 
 let lastGifState = null;
 let bust = 0;
 let lastState = null;
+let theme = 'cyber';
 
 function setVar(name, val){ document.documentElement.style.setProperty(name, val); }
 
@@ -175,7 +203,8 @@ function toastMsg(t){
 }
 
 function applyState(s){
-  const color = COLORS[s] || '#00f0ff';
+  const pal = STATE_COLORS[theme] || STATE_COLORS.cyber;
+  const color = pal[s] || pal.thinking;
   setVar('--st', color);
   led.style.background = color; led.style.boxShadow = '0 0 8px ' + color;
   stateEl.textContent = (s||'boot').toUpperCase();
@@ -187,6 +216,21 @@ function applyState(s){
     bust++;
     petImg.src = 'gifs/' + (GIFS[s] || GIFS.idle) + '?v=' + bust;
   }
+}
+
+function applyTheme(t){
+  theme = t;
+  document.documentElement.setAttribute('data-theme', t);
+  try { localStorage.setItem('pet_theme', t); } catch(_) {}
+  titleTxt.innerHTML = '<b>C:\\&gt;</b> CLAUDE.PET // ' + (THEME_NAMES[t] || 'CYBER');
+  if (lastState) applyState(lastState.state);
+}
+
+function cycleTheme(){
+  const i = THEMES.indexOf(theme);
+  const n = THEMES[(i + 1) % THEMES.length];
+  applyTheme(n);
+  toastMsg('THEME ' + (THEME_NAMES[n] || n));
 }
 
 function tick(){
@@ -230,6 +274,7 @@ function api(path){
 }
 
 // actions
+document.getElementById('bTheme').onclick = ()=>{ cycleTheme(); };
 document.getElementById('bFocus').onclick = ()=>{ api('/api/focus'); toastMsg('FOCUS'); };
 document.getElementById('bTerm').onclick = (e)=>{
   const min = e.target.textContent === '收起';
@@ -246,12 +291,18 @@ document.getElementById('bExit').onclick = ()=>{ api('/api/exit'); };
 petImg.addEventListener('dblclick', ()=>{ api('/api/focus'); toastMsg('FOCUS TERM'); });
 
 document.addEventListener('keydown', (e)=>{
+  if (e.key === 't' || e.key === 'T'){ cycleTheme(); }
   if (e.key === 'd' || e.key === 'D'){ api('/api/debug?cycle=1'); toastMsg('DBG'); }
   if (e.key === 'Escape'){ api('/api/exit'); }
 });
 
 // boot
 (function(){
+  let saved = 'cyber';
+  try { saved = localStorage.getItem('pet_theme') || 'cyber'; } catch(_) {}
+  if (THEMES.indexOf(saved) === -1) saved = 'cyber';
+  applyTheme(saved);
+
   const init = window.__INIT__ || {};
   render(init);
   tick();

@@ -1,23 +1,44 @@
 # 配置 / 状态机 / API / 自定义
 
 ## 状态机
-数据源：`~/.claude/projects/**/*.jsonl` 转录文件的 mtime（最新一次写入时间）+ 进程检测。
+数据源：`~/.claude/projects/**/*.jsonl` 转录文件的**最后一条消息内容分类** + 进程检测。
+（Claude Code 只在回合边界写转录、流式期间不写，故不用 mtime，而读取内容判断当前是否"回合中"。）
 
-**连续活动（burst）推断**（`app/server.js` 内，可改常量）：
+`app/server.js` 的 `classifyMessage` 把最后一条有时间戳的消息分类：
+- `user`（输入或 `tool_result`）→ 回合中（working）
+- `assistant` 含 `thinking` / `tool_use` / `text+tool_use` → 回合中（working）
+- `assistant` 纯 `text` → 回合完成（done → idle）
+- 无时间戳的元数据行跳过
 
-| 状态 | 触发 | 常量 |
-|---|---|---|
-| thinking | 连续活动 < 5s | `THINK_MS=5000` |
-| working | 连续活动 5s–30s | `WORK_MS=30000` |
-| working_long | 连续活动 > 30s | 由 `WORK_MS` 推 |
-| done | 一次活动结束，保持 5s | `DONE_HOLD_MS=5000` |
-| idle | 安静（活动间隔超 `BURST_GAP_MS=25000`） | `BURST_GAP_MS=25000` |
-| offline | 未检测到 claude 进程 | — |
-| error | 最近 30s 转录出现 `"isError":true` | `ERROR_WINDOW_MS=30000` |
+状态映射（`computeState`，可改常量）：
 
+| 状态 | 触发 |
+|---|---|
+| thinking | 回合开始 < 5s（`THINK_MS=5000`） |
+| working | 回合开始 5s–30s（`WORK_MS=30000`） |
+| working_long | 回合开始 > 30s |
+| done | 回合完成（assistant 纯 text 写入），闪 5s（`DONE_HOLD_MS=5000`） |
+| idle | 回合完成 5s 后 / 无转录 |
+| offline | 未检测到 claude 进程 |
+| error | 最近 30s 转录出现 `"isError":true`（`ERROR_WINDOW_MS=30000`） |
+
+- 安全兜底：working 标记超过 `STALE_MS=600000`（10min）未更新则回 idle。
 - 服务端每 **500ms** 轮询一次，进程检测每 **2s** 一次（`tasklist` / `Get-CimInstance`）。
 - 客户端每 **500ms** 拉 `/api/state` 切 GIF → 状态变化 **≤1s** 反映。
 - 终端进程死亡 → 进入关闭流程，**≤5s** 桌宠自退（`SHUTDOWN_HOLD_MS=2500` + 客户端 `window.close()` + 强杀 Edge）。
+
+## 主题
+`app/pet.html` 内置 4 套主题，点"主题"按钮或按键盘 `T` 循环切换，`localStorage['pet_theme']` 持久化（重开窗口保留），默认 `cyber`：
+
+| 主题 | 风格 |
+|---|---|
+| cyber（默认） | 赛博霓虹：深蓝底 + 青/品红发光 + 扫描线 |
+| paper | 极简白：米白底、近黑文字、发丝边框、无强发光 |
+| matrix | 终端绿：纯黑底 + 荧光绿磷光 + 绿扫描线 |
+| gold | 暗金 OLED：纯黑底 + 香槟金描边、内敛发光 |
+
+- 主题 = CSS 变量集（`--bg1/--bg2/--bg-body/--txt/--dim/--ac/--ac-rgb/--ac2/--ac2-rgb/--scan`），改 `app/pet.html` 顶部的 `<style>` 即可加新主题。
+- 各主题有独立的状态色（JS 里 `STATE_COLORS` 按主题覆盖）。
 
 ## HTTP API（127.0.0.1:9876）
 | 路径 | 说明 |
