@@ -104,12 +104,12 @@ function Invoke-WindowAction {
     }
 }
 
-function Add-UnicodeKey {
-    param($List, [int]$Scan, [int]$Flags)
+function Add-VkKey {
+    param($List, [int]$Vk, [int]$Flags)
     $union = New-Object PetWin+INPUTUNION
     $ki = New-Object PetWin+KEYBDINPUT
-    $ki.wVk = 0
-    $ki.wScan = $Scan
+    $ki.wVk = $Vk
+    $ki.wScan = 0
     $ki.dwFlags = $Flags
     $ki.dwExtraInfo = [IntPtr]::Zero
     $union.ki = $ki
@@ -128,45 +128,46 @@ function Send-TextToConsole {
     $hwnd = Get-ConsoleWindowHandle -Target $Target
     if ($hwnd -eq [IntPtr]::Zero) { Set-Content (Join-Path $PSScriptRoot 'send.result') $result; return }
 
+    # console windows are owned by conhost.exe, so compute the terminal console's owner PID
+    $conhostPid = [uint32]0
+    [PetWin]::FreeConsole() | Out-Null
+    $att = [PetWin]::AttachConsole([uint32]$Target)
+    if ($att) {
+        $cw = [PetWin]::GetConsoleWindow()
+        [PetWin]::GetWindowThreadProcessId($cw, [ref]$conhostPid) | Out-Null
+        [PetWin]::FreeConsole() | Out-Null
+    }
+
     # focus the terminal (temporarily disable the foreground-lock timeout)
     $old = [IntPtr]::Zero
     [PetWin]::SystemParametersInfo(0x2000, 0, $old, 0) | Out-Null
     [PetWin]::SystemParametersInfo(0x2001, 0, [IntPtr]::Zero, 0) | Out-Null
     [PetWin]::ShowWindow($hwnd, 9) | Out-Null
-    [PetWin]::SetForegroundWindow($hwnd) | Out-Null
-    Start-Sleep -Milliseconds 400
-    [PetWin]::SystemParametersInfo(0x2001, 0, $old, 0) | Out-Null
+    $fgOk = $false
+    for ($i = 0; $i -lt 4; $i++) {
+        [PetWin]::SetForegroundWindow($hwnd) | Out-Null
+        Start-Sleep -Milliseconds 250
+        $fgPid = [uint32]0
+        [PetWin]::GetWindowThreadProcessId([PetWin]::GetForegroundWindow(), [ref]$fgPid) | Out-Null
+        if ($fgPid -eq $conhostPid -or $fgPid -eq [uint32]$Target) { $fgOk = $true; break }
+    }
 
-    # verify the foreground window belongs to the terminal process (handle may differ)
-    $fgPid = [uint32]0
-    [PetWin]::GetWindowThreadProcessId([PetWin]::GetForegroundWindow(), [ref]$fgPid) | Out-Null
-    if ($fgPid -eq [uint32]$Target) {
-        # type the text as Unicode key events + Enter
+    # paste while the foreground lock stays disabled (restore it AFTER sending)
+    if ($fgOk) {
         $list = New-Object 'System.Collections.Generic.List[PetWin+INPUT]'
-        foreach ($ch in $Text.ToCharArray()) {
-            $sc = [uint16][char]$ch
-            Add-UnicodeKey $list $sc 0x0004                 # KEYEVENTF_UNICODE (down)
-            Add-UnicodeKey $list $sc 0x0006                 # ... | KEYEVENTF_KEYUP
-        }
-        Add-UnicodeKey $list 13 0                            # Enter (VK_RETURN via wScan? use wVk)
-        # Enter needs VK not unicode - build it via the union with wVk=13
-        $union = New-Object PetWin+INPUTUNION
-        $ki = New-Object PetWin+KEYBDINPUT
-        $ki.wVk = 13; $ki.wScan = 0; $ki.dwFlags = 0; $ki.dwExtraInfo = [IntPtr]::Zero
-        $union.ki = $ki
-        $in = New-Object PetWin+INPUT; $in.type = 1; $in.U = $union
-        $list.Add($in) | Out-Null
-        $ki.dwFlags = 0x0002   # KEYEVENTF_KEYUP
-        $union.ki = $ki
-        $in = New-Object PetWin+INPUT; $in.type = 1; $in.U = $union
-        $list.Add($in) | Out-Null
-
+        Add-VkKey $list 0x11 0          # CTRL down
+        Add-VkKey $list 0x56 0          # V down
+        Add-VkKey $list 0x56 0x0002     # V up
+        Add-VkKey $list 0x11 0x0002     # CTRL up
+        Add-VkKey $list 0x0D 0          # ENTER down (submit claude input)
+        Add-VkKey $list 0x0D 0x0002     # ENTER up
         $arr = $list.ToArray()
         # Marshal.SizeOf can't size Sequential+Explicit INPUT; INPUT is 40 bytes on x64, 28 on x86
         $cb = if ([IntPtr]::Size -eq 8) { 40 } else { 28 }
         $sent = [PetWin]::SendInput([uint32]$arr.Length, $arr, $cb)
         if ($sent -gt 0) { $result = 'pasted' }
     }
+    [PetWin]::SystemParametersInfo(0x2001, 0, $old, 0) | Out-Null   # restore foreground lock
     Set-Content (Join-Path $PSScriptRoot 'send.result') $result
 }
 
