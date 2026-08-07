@@ -2,157 +2,178 @@
 <html lang="zh-CN" data-theme="cyber">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=320,height=440">
 <title>CLAUDE.PET</title>
 <style>
 /* ============ themes ============ */
 :root,
-html[data-theme="cyber"]{            /* 赛博霓虹 (默认) */
-  --bg1:#04060d; --bg2:#0a0f1c; --bg-body:#04060d;
+html[data-theme="cyber"]{
+  --bg1:#04060d; --bg2:#0a0f1c; --bg-body:transparent;
   --txt:#cfe9ff; --dim:#5f7290;
   --ac:#00f0ff;  --ac-rgb:0,240,255;
   --ac2:#ff00e5; --ac2-rgb:255,0,229;
   --scan:255,255,255;
 }
-html[data-theme="paper"]{             /* 极简白 */
-  --bg1:#fafaf7; --bg2:#efefe9; --bg-body:#f2f2ed;
+html[data-theme="paper"]{
+  --bg1:#fafaf7; --bg2:#efefe9; --bg-body:transparent;
   --txt:#1c1c1a; --dim:#8d8d86;
   --ac:#4a4a48;  --ac-rgb:74,74,72;
   --ac2:#b8894a; --ac2-rgb:184,137,74;
   --scan:0,0,0;
 }
-html[data-theme="matrix"]{            /* 终端绿 */
-  --bg1:#001100; --bg2:#001b00; --bg-body:#000800;
+html[data-theme="matrix"]{
+  --bg1:#001100; --bg2:#001b00; --bg-body:transparent;
   --txt:#b9ffc4; --dim:#3f8f4f;
   --ac:#00ff41;  --ac-rgb:0,255,65;
   --ac2:#00c42e; --ac2-rgb:0,196,46;
   --scan:0,255,65;
 }
-html[data-theme="gold"]{              /* 暗金 OLED */
-  --bg1:#000000; --bg2:#0e0b06; --bg-body:#000000;
+html[data-theme="gold"]{
+  --bg1:#000000; --bg2:#0e0b06; --bg-body:transparent;
   --txt:#f3e9cd; --dim:#7d7056;
   --ac:#ffd166;  --ac-rgb:255,209,102;
   --ac2:#b58a2f; --ac2-rgb:181,138,47;
   --scan:255,209,102;
 }
-
-:root{
-  --fs:1;                              /* global font/UI scale (0.85-1.35) */
-  --pet-size:clamp(210px, min(80%, 300px), 300px);
-}
+:root{ --fs:1; --st:#00f0ff; }
 
 *{box-sizing:border-box;margin:0;padding:0;user-select:none;-webkit-user-select:none}
-html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-body);
-  font-family:'Cascadia Code','Cascadia Mono',Consolas,'Microsoft YaHei',monospace;
-  color:var(--txt);transition:background .25s}
-#shell{width:100%;min-width:320px;height:100%;min-height:430px;position:relative;display:flex;flex-direction:column;
+html,body{width:100%;height:100%;overflow:hidden;background:transparent;   /* transparent -> host see-through */
+  font-family:'Cascadia Code','Cascadia Mono',Consolas,'Microsoft YaHei',monospace;color:var(--txt)}
+#toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:99;
+  font-size:calc(9px * var(--fs));letter-spacing:2px;color:var(--bg1);background:var(--st);
+  padding:3px 10px;opacity:0;transition:opacity .2s;white-space:nowrap;pointer-events:none;
+  box-shadow:0 0 12px var(--st)}
+#toast.show{opacity:1}
+
+/* ============ BALL VIEW ============ */
+#ball{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:transparent;cursor:grab;touch-action:none}
+#ball.dragging{cursor:grabbing}
+.ball-ring{position:absolute;width:132px;height:132px;border-radius:50%;
+  border:1px solid rgba(var(--ac-rgb),.45);
+  box-shadow:0 0 20px rgba(var(--ac-rgb),.28), inset 0 0 16px rgba(var(--ac-rgb),.14);
+  animation:spin 10s linear infinite}
+.ball-ring::before{content:'';position:absolute;top:-2px;left:50%;width:10px;height:5px;
+  background:var(--st);box-shadow:0 0 8px var(--st);transform:translateX(-50%)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ball-pet{position:relative;width:102px;height:102px;object-fit:contain;
+  filter:drop-shadow(0 0 10px rgba(var(--ac-rgb),.35))}
+.ball-status{position:absolute;top:8px;left:0;right:0;text-align:center;pointer-events:none;
+  font-size:calc(11px * var(--fs));letter-spacing:2px;color:var(--st);
+  text-shadow:0 0 8px var(--st),0 0 16px var(--st)}
+
+/* bubble menu */
+#bubbles{position:absolute;inset:0;pointer-events:none;z-index:50}
+#bubbles.show{pointer-events:auto}
+.bubble{position:absolute;left:50%;top:50%;width:46px;height:46px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  background:rgba(var(--ac-rgb),.13);border:1px solid rgba(var(--ac-rgb),.5);
+  color:var(--txt);font-size:calc(9px*var(--fs));letter-spacing:1px;white-space:nowrap;
+  transition:transform .16s ease;box-shadow:0 0 8px rgba(var(--ac-rgb),.25)}
+.bubble:hover{background:rgba(var(--ac-rgb),.28)}
+.bubble.bad{border-color:#ff3b3b;color:#ff6b6b}
+
+/* ============ PANEL VIEW ============ */
+body.mode-ball #panel{display:none}
+body.mode-panel #ball{display:none}
+#panel{position:absolute;inset:0;display:flex;flex-direction:column;padding:7px 10px 9px;
   background:
     radial-gradient(120% 90% at 50% 0%, rgba(var(--ac-rgb),.10), transparent 55%),
     radial-gradient(90% 60% at 80% 100%, rgba(var(--ac2-rgb),.07), transparent 60%),
     linear-gradient(160deg,var(--bg1),var(--bg2));
   border:1px solid rgba(var(--ac-rgb),.35);
-  box-shadow:0 0 18px rgba(var(--ac-rgb),.18), inset 0 0 34px rgba(var(--ac-rgb),.06);
-  padding:7px 10px 9px;transition:border-color .25s, box-shadow .25s}
-/* scanlines */
-#shell::after{content:'';position:absolute;inset:0;pointer-events:none;
+  box-shadow:0 0 18px rgba(var(--ac-rgb),.18)}
+#panel::after{content:'';position:absolute;inset:0;pointer-events:none;
   background:repeating-linear-gradient(0deg,rgba(var(--scan),.05) 0 1px,transparent 1px 3px);
   mix-blend-mode:overlay}
-/* corner brackets */
-.corner{position:absolute;width:11px;height:11px;border:1px solid var(--st);
-  opacity:.8;pointer-events:none;filter:drop-shadow(0 0 4px var(--st))}
+.corner{position:absolute;width:11px;height:11px;border:1px solid var(--st);opacity:.8;z-index:2;
+  pointer-events:none;filter:drop-shadow(0 0 4px var(--st))}
 .corner.tl{top:3px;left:3px;border-right:none;border-bottom:none}
 .corner.tr{top:3px;right:3px;border-left:none;border-bottom:none}
 .corner.bl{bottom:3px;left:3px;border-right:none;border-top:none}
 .corner.br{bottom:3px;right:3px;border-left:none;border-top:none}
 
-/* header */
 .header{display:flex;align-items:center;gap:6px;flex:none;min-height:16px}
 .led{width:8px;height:8px;border-radius:50%;background:var(--st);flex:none;
   box-shadow:0 0 8px var(--st);animation:blink 1.2s steps(1) infinite}
 @keyframes blink{50%{opacity:.25}}
 .title{font-size:calc(10px * var(--fs));letter-spacing:2px;color:var(--dim);white-space:nowrap;overflow:hidden}
-.title b{color:var(--st);font-weight:600}
-.clock{margin-left:auto;font-size:calc(10px * var(--fs));color:var(--dim);letter-spacing:1px}
-.fsctl{display:flex;gap:2px;margin-left:2px}
-.fsctl button{font-family:inherit;font-size:calc(11px * var(--fs));width:calc(15px * var(--fs));height:calc(15px * var(--fs));
+.title b{color:var(--st)}
+.clock{margin-left:auto;font-size:calc(10px * var(--fs));color:var(--dim)}
+.mini{font-family:inherit;font-size:calc(11px*var(--fs));width:calc(15px*var(--fs));height:calc(15px*var(--fs));
   line-height:1;color:var(--txt);background:rgba(var(--ac-rgb),.08);border:1px solid rgba(var(--ac-rgb),.3);
   cursor:pointer;padding:0}
-.fsctl button:hover{background:rgba(var(--ac-rgb),.22)}
+.mini:hover{background:rgba(var(--ac-rgb),.22)}
+.fsctl{display:flex;gap:2px}
 
-/* state line */
 .statebox{flex:none;margin-top:4px}
-.stateline{font-size:calc(17px * var(--fs));font-weight:700;letter-spacing:3px;color:var(--st);
-  text-shadow:0 0 8px var(--st),0 0 22px var(--st);display:flex;align-items:baseline;gap:8px}
+.stateline{font-size:calc(16px * var(--fs));font-weight:700;letter-spacing:3px;color:var(--st);
+  text-shadow:0 0 8px var(--st),0 0 20px var(--st);display:flex;align-items:baseline;gap:8px}
 .stateline .cn{font-size:calc(9px * var(--fs));letter-spacing:1px;color:var(--dim);font-weight:400}
-.bar{flex:none;height:5px;margin-top:5px;position:relative;background:rgba(var(--scan),.08);
-  border:1px solid rgba(var(--scan),.12)}
-.bar i{position:absolute;inset:0;width:0%;background:linear-gradient(90deg,var(--st),transparent);
-  box-shadow:0 0 8px var(--st);transition:width .4s linear}
-.bar u{position:absolute;right:0;top:-1px;font-size:calc(8px * var(--fs));color:var(--dim);
-  letter-spacing:1px;padding-right:1px}
+.bar{flex:none;height:5px;margin-top:5px;position:relative;background:rgba(var(--scan),.08);border:1px solid rgba(var(--scan),.12)}
+.bar i{position:absolute;inset:0;width:0%;background:linear-gradient(90deg,var(--st),transparent);box-shadow:0 0 8px var(--st);transition:width .4s linear}
+.bar u{position:absolute;right:0;top:-1px;font-size:calc(8px * var(--fs));color:var(--dim)}
 
-/* pet stage — always centered, fills width better now */
-.stage{flex:1;min-height:150px;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.ring{position:absolute;width:calc(var(--pet-size) * 1.08);height:calc(var(--pet-size) * 1.08);border-radius:50%;
-  border:1px solid rgba(var(--ac-rgb),.16);
-  box-shadow:0 0 30px rgba(var(--ac-rgb),.10), inset 0 0 24px rgba(var(--ac-rgb),.05);
-  animation:spin 14s linear infinite;pointer-events:none}
-@keyframes spin{to{transform:rotate(360deg)}}
-.ring::before{content:'';position:absolute;top:-2px;left:50%;width:8px;height:4px;
-  background:var(--st);box-shadow:0 0 8px var(--st);transform:translateX(-50%)}
+.stage{flex:1;min-height:120px;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.panel-ring{position:absolute;width:calc(var(--pet-size)*1.08);height:calc(var(--pet-size)*1.08);border-radius:50%;
+  border:1px solid rgba(var(--ac-rgb),.16);box-shadow:0 0 30px rgba(var(--ac-rgb),.10);
+  animation:spin 14s linear infinite}
+:root{--pet-size:clamp(150px, min(62%, 210px), 210px)}
 #pet{position:relative;width:var(--pet-size);height:var(--pet-size);object-fit:contain;cursor:pointer;
   filter:drop-shadow(0 0 14px rgba(var(--ac-rgb),.22))}
-#pet.dim{opacity:.75}
+#pet.dim{opacity:.6}
 
-/* footer */
+.nowbar{flex:none;display:flex;gap:6px;margin-top:4px;font-size:calc(9px*var(--fs));color:var(--dim);
+  border:1px solid rgba(var(--ac-rgb),.18);background:rgba(var(--ac-rgb),.04);padding:2px 6px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nowbar b{color:var(--st);font-weight:400}
+
 .footer{flex:none;margin-top:5px}
-.meta{display:flex;justify-content:space-between;font-size:calc(9px * var(--fs));color:var(--dim);
-  letter-spacing:1px;margin-bottom:5px}
+.meta{display:flex;justify-content:space-between;font-size:calc(9px * var(--fs));color:var(--dim);margin-bottom:5px}
 .meta b{color:var(--st);font-weight:400}
 .btns{display:flex;gap:4px}
 .btn{flex:1;font-family:inherit;font-size:calc(9px * var(--fs));letter-spacing:1px;color:var(--txt);
   background:rgba(var(--ac-rgb),.05);border:1px solid rgba(var(--ac-rgb),.28);padding:calc(4px * var(--fs)) 0;
   cursor:pointer;text-align:center;transition:all .15s}
-.btn:hover{background:rgba(var(--ac-rgb),.18);color:var(--txt);box-shadow:0 0 10px rgba(var(--ac-rgb),.4)}
-.btn.bad:hover{background:rgba(255,59,59,.2);border-color:#ff3b3b;box-shadow:0 0 10px rgba(255,59,59,.4)}
-#toast{position:absolute;left:50%;bottom:74px;transform:translateX(-50%);
-  font-size:calc(9px * var(--fs));letter-spacing:2px;color:var(--bg1);background:var(--st);
-  padding:2px 8px;opacity:0;transition:opacity .2s;white-space:nowrap;pointer-events:none;
-  box-shadow:0 0 12px var(--st);z-index:5}
-#toast.show{opacity:1}
+.btn:hover{background:rgba(var(--ac-rgb),.18)}
+.btn.bad:hover{background:rgba(255,59,59,.2);border-color:#ff3b3b}
 </style>
 </head>
-<body>
-<div id="shell">
-  <i class="corner tl"></i><i class="corner tr"></i>
-  <i class="corner bl"></i><i class="corner br"></i>
+<body class="mode-ball">
+<script>
+window.__INIT__ = __INIT_PAYLOAD__;
+window.__CONFIG__ = __CONFIG_PAYLOAD__;
+</script>
 
+<!-- ============ BALL ============ -->
+<div id="ball">
+  <div class="ball-ring"></div>
+  <img id="ballPet" class="ball-pet" alt="pet" draggable="false">
+  <div id="ballStatus" class="ball-status">待命</div>
+  <div id="bubbles"></div>
+</div>
+
+<!-- ============ PANEL ============ -->
+<div id="panel">
+  <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
   <div class="header">
     <span class="led" id="led"></span>
     <span class="title" id="titleTxt"><b>C:\&gt;</b> CLAUDE.PET // CYBER</span>
     <span class="clock" id="clock">--:--:--</span>
-    <span class="fsctl">
-      <button id="fsMinus" title="缩小字体">−</button>
-      <button id="fsPlus" title="放大字体">+</button>
-    </span>
+    <span class="fsctl"><button class="mini" id="fsMinus" title="缩小">−</button><button class="mini" id="fsPlus" title="放大">+</button></span>
+    <button class="mini" id="bCollapse" title="收起为球">⇲</button>
   </div>
-
   <div class="statebox">
-    <div class="stateline"><span id="state">BOOT</span><span class="cn" id="statecn">初始化</span></div>
+    <div class="stateline"><span id="state">BOOT</span><span class="cn" id="statecn"></span></div>
     <div class="bar"><i id="fill"></i><u id="age">AGE --</u></div>
   </div>
-
   <div class="stage">
-    <div class="ring"></div>
+    <div class="panel-ring"></div>
     <img id="pet" alt="pet" draggable="false">
   </div>
-
+  <div class="nowbar"><b>现在:</b><span id="now">—</span></div>
   <div class="footer">
-    <div class="meta">
-      <span>CLI <b id="cli">?</b></span>
-      <span>TERM <b id="term">?</b></span>
-      <span id="forcedTag"></span>
-    </div>
+    <div class="meta"><span>CLI <b id="cli">?</b></span><span>TERM <b id="term">?</b></span><span id="forcedTag"></span></div>
     <div class="btns">
       <button class="btn" id="bTheme">主题</button>
       <button class="btn" id="bTerm">终端</button>
@@ -160,38 +181,28 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-body);
       <button class="btn bad" id="bExit">退出</button>
     </div>
   </div>
-
-  <div id="toast"></div>
 </div>
 
-<script>
-window.__INIT__ = __INIT_PAYLOAD__;
-window.__CONFIG__ = __CONFIG_PAYLOAD__;
+<div id="toast"></div>
 
-const GIFS = {
-  thinking: 'thinking.gif',
-  working: 'working.gif',
-  working_long: 'workinglong.gif',
-  done: 'done.gif',
-  idle: 'offlineandidle.gif',
-  offline: 'offlineandidle.gif',
-  error: 'errorandwaityou.gif',
-};
-// per-theme state colors
+<script>
+const GIFS = { thinking:'thinking.gif', working:'working.gif', working_long:'workinglong.gif', done:'done.gif', idle:'offlineandidle.gif', offline:'offlineandidle.gif', error:'errorandwaityou.gif' };
 const STATE_COLORS = {
   cyber:  { thinking:'#00f0ff', working:'#39ff14', working_long:'#ffb000', done:'#ff00e5', idle:'#8fa8c8', offline:'#ff3b3b', error:'#ff2a2a' },
   paper:  { thinking:'#2a6f97', working:'#2e7d32', working_long:'#b8860b', done:'#8e44ad', idle:'#7f8c8d', offline:'#c0392b', error:'#c0392b' },
   matrix: { thinking:'#00ff41', working:'#39ff9b', working_long:'#aaff00', done:'#00e5ff', idle:'#4fbf6f', offline:'#ff2a2a', error:'#ff2a2a' },
   gold:   { thinking:'#ffd166', working:'#ffb703', working_long:'#fb8500', done:'#e9c46a', idle:'#a58a5a', offline:'#ff6b6b', error:'#ff6b6b' },
 };
-const CN = {
-  thinking: '思考中', working: '工作中', working_long: '长任务',
-  done: '完成', idle: '待命', offline: '离线', error: '异常',
-};
-const THEMES = ['cyber', 'paper', 'matrix', 'gold'];
-const THEME_NAMES = { cyber: 'CYBER', paper: 'PAPER', matrix: 'MATRIX', gold: 'GOLD' };
+const CN = { thinking:'思考中', working:'工作中', working_long:'长任务', done:'完成', idle:'待命', offline:'离线', error:'异常' };
+const THEMES = ['cyber','paper','matrix','gold'];
+const THEME_NAMES = { cyber:'CYBER', paper:'PAPER', matrix:'MATRIX', gold:'GOLD' };
 const FS_MIN = 0.85, FS_MAX = 1.35;
+const BALL_W = 150, BALL_H = 170, PANEL_W = 320, PANEL_H = 480;
 
+const ball = document.getElementById('ball');
+const ballPet = document.getElementById('ballPet');
+const ballStatus = document.getElementById('ballStatus');
+const bubblesEl = document.getElementById('bubbles');
 const petImg = document.getElementById('pet');
 const led = document.getElementById('led');
 const stateEl = document.getElementById('state');
@@ -204,20 +215,35 @@ const termEl = document.getElementById('term');
 const forcedTag = document.getElementById('forcedTag');
 const titleTxt = document.getElementById('titleTxt');
 const toast = document.getElementById('toast');
+const nowEl = document.getElementById('now');
 
-let lastGifState = null;
-let bust = 0;
-let lastState = null;
-let theme = 'cyber';
-let fs = 1;
+let theme = 'cyber', fs = 1, mode = 'ball', prevState = null, curOpacity = 100;
+let lastGif = null, bust = 0, lastState = null, topmost = true;
 
-function setVar(name, val){ document.documentElement.style.setProperty(name, val); }
+function setVar(n, v){ document.documentElement.style.setProperty(n, v); }
+function toastMsg(t){ toast.textContent = t; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'), 900); }
 
-function toastMsg(t){
-  toast.textContent = t; toast.classList.add('show');
-  setTimeout(()=>toast.classList.remove('show'), 900);
+// ---- WebView2 host bridge ----
+function callHost(method){
+  try {
+    const h = window.chrome && window.chrome.webview && window.chrome.webview.hostObjects && window.chrome.webview.hostObjects.petHost;
+    if (h && h[method]){
+      const args = Array.prototype.slice.call(arguments, 1);
+      const r = h[method].apply(h, args);
+      if (r && r.then) r.catch(()=>{});
+    }
+  } catch(_){}
 }
 
+// ---- mode ----
+function setMode(m){
+  mode = m;
+  document.body.className = 'mode-' + m;
+  if (m === 'panel') callHost('Resize', PANEL_W, PANEL_H);
+  else callHost('Resize', BALL_W, BALL_H);
+}
+
+// ---- state ----
 function applyState(s){
   const pal = STATE_COLORS[theme] || STATE_COLORS.cyber;
   const color = pal[s] || pal.thinking;
@@ -225,27 +251,34 @@ function applyState(s){
   led.style.background = color; led.style.boxShadow = '0 0 8px ' + color;
   stateEl.textContent = (s||'boot').toUpperCase();
   stateCn.textContent = CN[s] || '';
+  ballStatus.textContent = CN[s] || '';
   petImg.classList.toggle('dim', s === 'offline');
-
-  if (s !== lastGifState){
-    lastGifState = s;
-    bust++;
-    petImg.src = 'gifs/' + (GIFS[s] || GIFS.idle) + '?v=' + bust;
+  if (s !== lastGif){
+    lastGif = s; bust++;
+    const g = 'gifs/' + (GIFS[s] || GIFS.idle) + '?v=' + bust;
+    ballPet.src = g; petImg.src = g;
   }
+  // notifications on transitions
+  if (prevState === 'working_long' && s === 'done') notify('任务完成');
+  if (s === 'error') notify('工具出错，请查看');
+  prevState = s;
+}
+function notify(msg){ toastMsg(msg); beep(); }
+function beep(){
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx(); const o = ctx.createOscillator(); const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination); o.frequency.value = 880; g.gain.value = 0.08;
+    o.start(); o.stop(ctx.currentTime + 0.18);
+  } catch(_){}
 }
 
-// ---- config persistence (localStorage + server config.json) ----
+// ---- theme / font / config ----
 function persistConfig(){
-  try {
-    localStorage.setItem('pet_theme', theme);
-    localStorage.setItem('pet_fs', String(fs));
-  } catch(_){}
-  try {
-    fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ theme, fs })}).catch(()=>{});
-  } catch(_){}
+  try { localStorage.setItem('pet_theme', theme); localStorage.setItem('pet_fs', String(fs)); } catch(_){}
+  try { fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({theme, fs})}).catch(()=>{}); } catch(_){}
 }
-
 function applyTheme(t){
   theme = t;
   document.documentElement.setAttribute('data-theme', t);
@@ -253,31 +286,15 @@ function applyTheme(t){
   if (lastState) applyState(lastState.state);
   persistConfig();
 }
-
-function cycleTheme(){
-  const i = THEMES.indexOf(theme);
-  const n = THEMES[(i + 1) % THEMES.length];
-  applyTheme(n);
-  toastMsg('THEME ' + (THEME_NAMES[n] || n));
-}
-
-function applyFs(v){
-  fs = Math.min(FS_MAX, Math.max(FS_MIN, v));
-  setVar('--fs', String(fs));
-}
+function cycleTheme(){ applyTheme(THEMES[(THEMES.indexOf(theme)+1) % THEMES.length]); toastMsg('THEME ' + THEME_NAMES[theme]); }
+function applyFs(v){ fs = Math.min(FS_MAX, Math.max(FS_MIN, v)); setVar('--fs', String(fs)); }
 
 function tick(){
-  const now = Date.now();
   const d = new Date();
-  clockEl.textContent =
-    String(d.getHours()).padStart(2,'0') + ':' +
-    String(d.getMinutes()).padStart(2,'0') + ':' +
-    String(d.getSeconds()).padStart(2,'0');
-
+  clockEl.textContent = String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+':'+String(d.getSeconds()).padStart(2,'0');
   if (lastState){
-    const age = Math.max(0, now - lastState.lastActivity);
-    const pct = Math.min(100, (age / 30000) * 100);
-    fill.style.width = pct.toFixed(1) + '%';
+    const age = Math.max(0, Date.now() - lastState.lastActivity);
+    fill.style.width = Math.min(100, (age/30000)*100).toFixed(1) + '%';
     ageEl.textContent = 'AGE ' + (age/1000).toFixed(1) + 's';
   }
 }
@@ -287,64 +304,114 @@ function render(json){
   applyState(json.state);
   cliEl.textContent = json.claude ? 'ON' : 'OFF';
   termEl.textContent = json.term ? (json.termAlive ? 'PID ' + json.term : 'GONE') : '--';
-  forcedTag.textContent = json.forced ? '[DBG ' + json.state.toUpperCase() + ']' : '';
+  forcedTag.textContent = json.forced ? '[DBG]' : '';
+  if (json.lastAction) nowEl.textContent = json.lastAction;
 }
 
 async function poll(){
-  try{
+  try {
     const r = await fetch('/api/state', {cache:'no-store'});
     const j = await r.json();
-    if (j.shutdown){ window.close(); return; }
+    if (j.shutdown){ persistConfig(); callHost('Close'); window.close(); return; }
     render(j);
-  }catch(e){
-    try{ window.close(); }catch(_){}
+  }catch(e){ try { window.close(); }catch(_){} }
+}
+function api(path){ return fetch(path, {method:'POST'}).catch(()=>{}); }
+
+// ---- bubbles ----
+const BUBBLES = [
+  {act:'theme', label:'主题'},
+  {act:'term', label:'终端'},
+  {act:'top', label:'置顶'},
+  {act:'op+', label:'+透'},
+  {act:'op-', label:'-透'},
+  {act:'exit', label:'退出', bad:true},
+];
+function showBubbles(){
+  bubblesEl.innerHTML = '';
+  const n = BUBBLES.length;
+  BUBBLES.forEach((b, i) => {
+    const el = document.createElement('button');
+    el.className = 'bubble' + (b.bad ? ' bad' : '');
+    el.textContent = b.label;
+    const ang = (Math.PI*2*i/n) - Math.PI/2;
+    const R = 56;
+    const x = Math.cos(ang)*R, y = Math.sin(ang)*R;
+    el.style.transform = 'translate(calc(-50% + ' + x + 'px), calc(-50% + ' + y + 'px)) scale(0)';
+    el.addEventListener('click', (e) => { e.stopPropagation(); bubbleAction(b.act); });
+    bubblesEl.appendChild(el);
+    setTimeout(() => { el.style.transform = 'translate(calc(-50% + ' + x + 'px), calc(-50% + ' + y + 'px)) scale(1)'; }, 20 + i*40);
+  });
+  bubblesEl.classList.add('show');
+}
+function hideBubbles(){ bubblesEl.classList.remove('show'); bubblesEl.innerHTML = ''; }
+function bubbleAction(act){
+  switch (act) {
+    case 'theme': cycleTheme(); break;
+    case 'term': api('/api/terminal?act=toggle'); break;
+    case 'top': topmost = !topmost; callHost('SetTopMost', topmost); toastMsg(topmost ? '已置顶' : '取消置顶'); break;
+    case 'op+': curOpacity = Math.min(100, curOpacity + 15); callHost('SetOpacity', curOpacity); toastMsg('透明度 ' + curOpacity + '%'); break;
+    case 'op-': curOpacity = Math.max(15, curOpacity - 15); callHost('SetOpacity', curOpacity); toastMsg('透明度 ' + curOpacity + '%'); break;
+    case 'exit': persistConfig(); callHost('Close'); api('/api/exit'); break;
   }
+  hideBubbles();
 }
 
-function api(path){
-  return fetch(path, {method:'POST'}).catch(()=>{});
-}
+// ---- ball interactions ----
+ball.addEventListener('pointerdown', (e) => {
+  if (e.button === 2) return;               // right-click handled by contextmenu
+  ball.setPointerCapture(e.pointerId);
+  ball._drag = { x: e.screenX, y: e.screenY };
+  ball.classList.add('dragging');
+});
+ball.addEventListener('pointermove', (e) => {
+  if (!ball._drag) return;
+  const dx = e.screenX - ball._drag.x, dy = e.screenY - ball._drag.y;
+  ball._drag.x = e.screenX; ball._drag.y = e.screenY;
+  callHost('Move', dx, dy);
+});
+ball.addEventListener('pointerup', () => { ball._drag = null; ball.classList.remove('dragging'); });
 
-// actions
-document.getElementById('bTheme').onclick = ()=>{ cycleTheme(); };
-document.getElementById('bTerm').onclick = ()=>{ api('/api/terminal?act=toggle'); toastMsg('TERM TOGGLE'); };
-document.getElementById('bDebug').onclick = ()=>{ api('/api/debug?cycle=1'); toastMsg('DBG CYCLE'); };
-document.getElementById('bExit').onclick = ()=>{ persistConfig(); api('/api/exit'); };
-document.getElementById('fsPlus').onclick = ()=>{ applyFs(fs + 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); };
-document.getElementById('fsMinus').onclick = ()=>{ applyFs(fs - 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); };
+let hoverTimer = null;
+ball.addEventListener('mouseenter', () => { hoverTimer = setTimeout(() => setMode('panel'), 350); });
+ball.addEventListener('mouseleave', () => { clearTimeout(hoverTimer); });
+ball.addEventListener('click', () => setMode('panel'));
+ball.addEventListener('contextmenu', (e) => { e.preventDefault(); if (mode === 'ball') showBubbles(); });
+document.addEventListener('click', (e) => { if (mode === 'ball' && !e.target.closest('.bubble')) hideBubbles(); });
 
-petImg.addEventListener('dblclick', ()=>{ api('/api/focus'); toastMsg('FOCUS TERM'); });
+// ---- panel actions ----
+document.getElementById('bTheme').onclick = () => { cycleTheme(); };
+document.getElementById('bTerm').onclick = () => { api('/api/terminal?act=toggle'); toastMsg('TERM TOGGLE'); };
+document.getElementById('bDebug').onclick = () => { api('/api/debug?cycle=1'); toastMsg('DBG'); };
+document.getElementById('bExit').onclick = () => { persistConfig(); callHost('Close'); api('/api/exit'); };
+document.getElementById('bCollapse').onclick = () => setMode('ball');
+document.getElementById('fsPlus').onclick = () => { applyFs(fs + 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); };
+document.getElementById('fsMinus').onclick = () => { applyFs(fs - 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); };
+petImg.addEventListener('dblclick', () => api('/api/focus'));
 
-document.addEventListener('keydown', (e)=>{
-  if (e.target === document.activeElement && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
-  if (e.key === 't' || e.key === 'T'){ cycleTheme(); }
+document.addEventListener('keydown', (e) => {
+  if (e.key === 't' || e.key === 'T') cycleTheme();
   if (e.key === 'd' || e.key === 'D'){ api('/api/debug?cycle=1'); toastMsg('DBG'); }
-  if (e.key === 'Escape'){ persistConfig(); api('/api/exit'); }
+  if (e.key === 'Escape'){ persistConfig(); callHost('Close'); api('/api/exit'); }
   if (e.key === '+' || e.key === '='){ applyFs(fs + 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); }
   if (e.key === '-' || e.key === '_'){ applyFs(fs - 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); }
 });
-
-// save config on close / unload
 window.addEventListener('beforeunload', persistConfig);
 window.addEventListener('pagehide', persistConfig);
 
-// boot
+// ---- boot ----
 (function(){
-  let savedTheme = 'cyber', savedFs = 1;
+  let st = 'cyber', sf = 1;
   try {
     const cfg = window.__CONFIG__ || {};
-    if (cfg.theme && THEMES.indexOf(cfg.theme) !== -1) savedTheme = cfg.theme;
-    if (typeof cfg.fs === 'number') savedFs = cfg.fs;
-    const t = localStorage.getItem('pet_theme');
-    if (t && THEMES.indexOf(t) !== -1) savedTheme = t;
-    const f = parseFloat(localStorage.getItem('pet_fs'));
-    if (isFinite(f)) savedFs = f;
+    if (cfg.theme && THEMES.indexOf(cfg.theme) !== -1) st = cfg.theme;
+    if (typeof cfg.fs === 'number') sf = cfg.fs;
+    const t = localStorage.getItem('pet_theme'); if (t && THEMES.indexOf(t) !== -1) st = t;
+    const f = parseFloat(localStorage.getItem('pet_fs')); if (isFinite(f)) sf = f;
   } catch(_){}
-  theme = savedTheme;
-  fs = Math.min(FS_MAX, Math.max(FS_MIN, savedFs));
-  applyTheme(savedTheme);
-  applyFs(fs);
-
+  theme = st; fs = Math.min(FS_MAX, Math.max(FS_MIN, sf));
+  applyTheme(theme); applyFs(fs);
+  setMode('ball');                       // start as a compact ball
   render(window.__INIT__ || {});
   tick();
 })();

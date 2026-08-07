@@ -7,7 +7,7 @@ rem  Env check runs first but does NOT block installation.
 rem ============================================================
 setlocal
 set "TARGET=%LOCALAPPDATA%\ClaudePet"
-set "VER=1.0.3"
+set "VER=1.1.0"
 
 echo ==========================================
 echo   ClaudePet v%VER% - Installer
@@ -33,6 +33,7 @@ if errorlevel 1 (
   echo  [ERR] failed to copy app files.
   exit /b 1
 )
+xcopy "%~dp0host" "%TARGET%\host\" /e /i /y /q >nul
 for %%F in (check-env.bat check-env.js start-both.bat start-pet.bat stop-pet.bat uninstall.bat) do (
   copy /y "%~dp0%%F" "%TARGET%\" >nul
 )

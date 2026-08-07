@@ -3,6 +3,9 @@ term.pid
 _server.log
 *.log
 edge_profile/
+host/webview2data/
+host/ClaudePet.Host.exe
+host/*.dll
 node_modules/
 dist/
 

@@ -16,31 +16,10 @@ public class PetWin {
 }
 '@
 
-function Get-EdgePath {
-    $c = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
-           "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe")
-    foreach ($p in $c) { if (Test-Path $p) { return $p } }
-    return $null
-}
-
-function Open-EdgeWindow {
-    $s = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-    $x = $s.Right - 340
-    $y = $s.Bottom - 502
-    $e = Get-EdgePath
-    if (-not $e) { Write-Error 'msedge not found'; exit 1 }
-    $dir = $PSScriptRoot
-    $pro = Join-Path $dir 'edge_profile'
-    $edgeArgs = @(
-        '--app=http://127.0.0.1:9876/',
-        '--window-size=320,472',
-        "--window-position=$x,$y",
-        "--user-data-dir=$pro",
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--disable-session-crashed-bubble'
-    )
-    Start-Process -FilePath $e -ArgumentList $edgeArgs
+function Open-HostWindow {
+    $hostExe = Join-Path (Split-Path $PSScriptRoot -Parent) 'host\ClaudePet.Host.exe'
+    if (-not (Test-Path $hostExe)) { Write-Error 'ClaudePet.Host.exe not found'; exit 1 }
+    Start-Process -FilePath $hostExe
 }
 
 function Get-ConsoleWindowHandle {
@@ -77,7 +56,7 @@ function Invoke-WindowAction {
 }
 
 switch ($Action) {
-    'open'    { Open-EdgeWindow }
+    'open'    { Open-HostWindow }
     'min'     { Invoke-WindowAction -Action min -Target $ProcId }
     'restore' { Invoke-WindowAction -Action restore -Target $ProcId }
     'focus'   { Invoke-WindowAction -Action focus -Target $ProcId }

@@ -131,6 +131,40 @@ function scanRecentError(now) {
   return null;
 }
 
+// The most recent tool action (for the "现在在做什么" line).
+const TOOL_LABELS = {
+  Bash: '运行 Bash', Edit: '编辑文件', Read: '读取文件', Write: '写文件',
+  Glob: '查找文件', Grep: '搜索代码', NotebookEdit: '编辑笔记', WebSearch: '联网搜索',
+  WebFetch: '抓取网页', Agent: '调用子代理', TaskCreate: '创建任务', TodoWrite: '更新任务',
+  Skill: '调用技能',
+};
+function readLastAction() {
+  const file = newestTranscriptPath();
+  if (!file) return '';
+  try {
+    const size = fs.statSync(file).size;
+    if (size === 0) return '';
+    const start = Math.max(0, size - 128 * 1024);
+    const fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(size - start);
+    try { fs.readSync(fd, buf, 0, buf.length, start); } finally { fs.closeSync(fd); }
+    const lines = buf.toString('utf8').split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line.startsWith('{')) continue;
+      let o;
+      try { o = JSON.parse(line); } catch { continue; }
+      const content = o.message && o.message.content;
+      if (!Array.isArray(content)) continue;
+      for (let j = content.length - 1; j >= 0; j--) {
+        const c = content[j];
+        if (c && c.type === 'tool_use' && c.name) return TOOL_LABELS[c.name] || c.name;
+      }
+    }
+  } catch {}
+  return '';
+}
+
 // ---- process checks (spawn tasklist, cached every PROC_CHECK_MS) ----
 function run(cmd) {
   return new Promise((resolve) => {
@@ -269,9 +303,9 @@ function beginShutdown() {
   shutdownAt = Date.now();
   state = 'offline';
   stateSince = shutdownAt;
-  // graceful: client polls shutdown:true and calls window.close();
-  // fallback: force-close the pet Edge window so it never lingers.
-  setTimeout(killPetEdge, 800);
+  // graceful: client polls shutdown:true and calls host Close + window.close();
+  // fallback: force-close the pet host window so it never lingers.
+  setTimeout(killPetWindow, 800);
 }
 
 function windowActive() {
@@ -288,9 +322,9 @@ function psRun(action, pid) {
 }
 
 // ---- poll loop ----
-function killPetEdge() {
+function killPetWindow() {
   execFile('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
-    "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | Where-Object { $_.CommandLine -like '*edge_profile*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    "Get-Process -Name 'ClaudePet.Host' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue"
   ], { windowsHide: true }, () => {});
 }
 
@@ -335,6 +369,7 @@ function stateJson() {
     term: termPid,
     termAlive: termAlive === null ? null : !!termAlive,
     forced: !!forced,
+    lastAction: readLastAction(),
     shutdown: shuttingDown,
     ts: now,
   };
