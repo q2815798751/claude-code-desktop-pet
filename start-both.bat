@@ -11,12 +11,7 @@ set "PORT=9876"
 
 rem ---- 0) environment check (required) ----
 call "%~dp0check-env.bat"
-if errorlevel 1 (
-  echo.
-  echo  [pet] environment check failed - fix the issues above, then retry.
-  echo.
-  exit /b 1
-)
+if errorlevel 1 goto :envfail
 
 rem ---- 1) terminal + claude (via app\pet-term.ps1, runs in user home dir) ----
 set "TERMPID="
@@ -28,19 +23,15 @@ if defined TERMPID (
   if errorlevel 1 set "TERMPID="
 )
 if not defined TERMPID (
-  echo  [pet] starting claude in Windows Terminal...
-  :: clear any stale PID so the server doesn't think a dead terminal is still alive
+  echo  [pet] starting claude terminal...
   del /q "%~dp0app\term.pid" >nul 2>&1
   where wt.exe >nul 2>&1
-  if errorlevel 1 (
-    echo  [ERR] Windows Terminal (wt.exe) not found. Install Microsoft Terminal or set it as the default terminal.
-    exit /b 1
-  )
-  :: pet-term.ps1 records its own PID into app\term.pid; server.js picks it up within ~0.5s.
-  wt.exe --window new --title "Claude Code (ClaudePet)" powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0app\pet-term.ps1"
-  if errorlevel 1 (
-    echo  [ERR] failed to launch Windows Terminal.
-    exit /b 1
+  if not errorlevel 1 (
+    echo  [pet] using Windows Terminal...
+    wt.exe --window new --title "Claude Code - ClaudePet" powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0app\pet-term.ps1"
+  ) else (
+    echo  [pet] Windows Terminal not found - using a PowerShell window...
+    start "" powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0app\pet-term.ps1"
   )
 )
 
@@ -59,9 +50,13 @@ for /l %%I in (1,1,30) do (
   %SystemRoot%\System32\timeout.exe /t 1 /nobreak >nul
 )
 :up
-if not defined UP (
-  echo  [ERR] pet server did not start on port %PORT%
-  exit /b 1
+if not defined UP goto :noserver
+
+rem ---- build the host window exe if it has never been built - fresh clone ----
+if not exist "%~dp0host\ClaudePet.Host.exe" (
+  echo  [pet] building host window - first run...
+  call "%~dp0host\build.bat"
+  if errorlevel 1 goto :nohost
 )
 
 rem ---- 4) open pet window (skip if already open) ----
@@ -73,3 +68,23 @@ if not "%WIN%"=="1" (
 
 endlocal
 exit /b 0
+
+:envfail
+echo.
+echo  [pet] environment check failed - fix the issues above, then retry.
+echo.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('ClaudePet environment check failed. Required: Node.js 18+ and the Claude Code CLI. See the console window for which items are missing.','ClaudePet - Error')" >nul 2>&1
+pause
+exit /b 1
+
+:noserver
+echo  [ERR] pet server did not start on port %PORT%
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('The ClaudePet server did not start on port 9876. This usually means Node.js is not available.','ClaudePet - Error')" >nul 2>&1
+pause
+exit /b 1
+
+:nohost
+echo  [ERR] failed to build the host window (ClaudePet.Host.exe)
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('ClaudePet could not build its host window. .NET Framework 4.x (csc.exe) may be missing.','ClaudePet - Error')" >nul 2>&1
+pause
+exit /b 1

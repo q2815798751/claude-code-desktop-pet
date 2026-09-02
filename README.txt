@@ -25,3 +25,4 @@ ClaudePet 桌宠 - 快速上手
 
 【遇到问题】
   运行 check-env.bat 查看环境自检报告，缺什么装什么。
+  缺少必须环境（node/claude）时启动会弹窗提示；首次启动会自动编译 host 窗口。

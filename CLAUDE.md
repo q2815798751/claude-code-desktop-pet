@@ -27,6 +27,7 @@ docs/                  INSTALL / CONFIG / DESIGN
 3. **路径一律 `%~dp0` / `%CD%` 展开**，不要在 .bat 里写死含中文的路径字面量。
 4. PowerShell 里 **`$PID` 是只读自动变量**，参数名不能叫 `Pid`（会导致静默失败），用 `ProcId`。
 5. **自身进程误判**：server.js 检测 claude 时，命令行含 `server.js` 的 node 进程必须排除（安装路径 `ClaudePet` 含 "claude" 字样，否则会自匹配误报在线）。
+6. **`.bat` 块内文本严禁未加引号的括号**：凡位于 `if (...) (  ...  )` 或 `for ... do (  ...  )` 块内的 `echo`/文本不能含裸露的 `(` `)`（如 `echo ...(first run)...`)，否则 cmd 解析整份 `.bat` 会崩、直接 `exit 255` 且不进入任何后续分支（曾导致首次启动静默失败）。必须改为不加括号的写法（如 `- first run`），或塞进被块内引号包住的字符串里。
 
 ## 关键文件入口
 - 状态机与阈值：`app/server.js` 顶部常量区（THINK_MS / WORK_MS / BURST_GAP_MS / DONE_HOLD_MS / SHUTDOWN_HOLD_MS / ERROR_WINDOW_MS）。

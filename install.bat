@@ -18,11 +18,11 @@ rem stop a running pet first so files are not locked
 curl -s -X POST http://127.0.0.1:9876/api/exit >nul 2>&1
 %SystemRoot%\System32\timeout.exe /t 1 /nobreak >nul
 
-echo  [1/4] Environment check (informational)...
+echo  [1/5] Environment check (informational)...
 call "%~dp0check-env.bat"
 
 echo.
-echo  [2/4] Installing to %TARGET% ...
+echo  [2/5] Installing to %TARGET% ...
 if exist "%TARGET%" (
   echo        removing previous installation...
   rmdir /s /q "%TARGET%" 2>nul
@@ -38,12 +38,20 @@ for %%F in (check-env.bat check-env.js start-both.bat start-pet.bat stop-pet.bat
   copy /y "%~dp0%%F" "%TARGET%\" >nul
 )
 
-echo  [3/4] Writing config...
+echo  [3/5] Building host window...
+call "%TARGET%\host\build.bat"
+if errorlevel 1 (
+  echo  [WARN] host window build failed - the pet window will not appear.
+  echo         Ensure .NET Framework 4.x is installed, then run host\build.bat manually.
+  pause
+)
+
+echo  [4/5] Writing config...
 > "%TARGET%\config.txt" echo ClaudePet v%VER%
 >> "%TARGET%\config.txt" echo installed=%date% %time%
 >> "%TARGET%\config.txt" echo home=%USERPROFILE%
 
-echo  [4/4] Creating desktop + start menu shortcuts...
+echo  [5/5] Creating desktop + start menu shortcuts...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $icon = '%TARGET%\app\pet.ico,0'; foreach ($folder in @($ws.SpecialFolders.Item('Desktop'), (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'))) { $s = $ws.CreateShortcut((Join-Path $folder 'Claude Pet.lnk')); $s.TargetPath = '%TARGET%\start-both.bat'; $s.WorkingDirectory = '%TARGET%'; $s.IconLocation = $icon; $s.Description = 'ClaudePet - Claude Code desktop pet'; $s.WindowStyle = 7; $s.Save() }"
 
 echo.
