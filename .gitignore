@@ -2,6 +2,9 @@
 term.pid
 _server.log
 *.log
+# persisted UI prefs (theme / font scale) and window position - runtime user state
+app/config.json
+app/host.json
 edge_profile/
 host/webview2data/
 host/ClaudePet.Host.exe

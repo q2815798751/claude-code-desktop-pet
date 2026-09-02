@@ -28,8 +28,20 @@ if defined TERMPID (
   if errorlevel 1 set "TERMPID="
 )
 if not defined TERMPID (
-  echo  [pet] starting claude terminal...
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath 'powershell' -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','app\pet-term.ps1' -PassThru; Set-Content -Path ('%CD%\app\term.pid') -Value $p.Id -Encoding Ascii"
+  echo  [pet] starting claude in Windows Terminal...
+  :: clear any stale PID so the server doesn't think a dead terminal is still alive
+  del /q "%~dp0app\term.pid" >nul 2>&1
+  where wt.exe >nul 2>&1
+  if errorlevel 1 (
+    echo  [ERR] Windows Terminal (wt.exe) not found. Install Microsoft Terminal or set it as the default terminal.
+    exit /b 1
+  )
+  :: pet-term.ps1 records its own PID into app\term.pid; server.js picks it up within ~0.5s.
+  wt.exe --window new --title "Claude Code (ClaudePet)" powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0app\pet-term.ps1"
+  if errorlevel 1 (
+    echo  [ERR] failed to launch Windows Terminal.
+    exit /b 1
+  )
 )
 
 rem ---- 2) pet server (skip if already listening) ----

@@ -22,8 +22,9 @@ function Open-HostWindow {
     Start-Process -FilePath $hostExe
 }
 
-function Get-ConsoleWindowHandle {
+function Get-TerminalWindowHandle {
     param([int]$Target)
+    # 1) legacy console (conhost) path - works for cmd / standalone powershell
     [PetWin]::FreeConsole() | Out-Null
     if ([PetWin]::AttachConsole([uint32]$Target)) {
         $h = [PetWin]::GetConsoleWindow()
@@ -31,14 +32,18 @@ function Get-ConsoleWindowHandle {
         if ($h -ne [IntPtr]::Zero) { return $h }
     }
     $proc = Get-Process -Id $Target -ErrorAction SilentlyContinue
-    if ($proc) { return $proc.MainWindowHandle }
+    if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) { return $proc.MainWindowHandle }
+    # 2) Windows Terminal fallback - a session hosted in WT has no console hwnd
+    #    (ConPTY), so fall back to the WT window itself (best effort).
+    $wt = Get-Process -Name 'WindowsTerminal' -ErrorAction SilentlyContinue
+    if ($wt -and $wt.MainWindowHandle -ne [IntPtr]::Zero) { return $wt.MainWindowHandle }
     return [IntPtr]::Zero
 }
 
 function Invoke-WindowAction {
     param([string]$Action, [int]$Target)
     if ($Target -le 0) { return }
-    $h = Get-ConsoleWindowHandle -Target $Target
+    $h = Get-TerminalWindowHandle -Target $Target
     if ($h -eq [IntPtr]::Zero) { return }
     switch ($Action) {
         'min'     { [PetWin]::ShowWindow($h, 6) | Out-Null }
