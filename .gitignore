@@ -2,9 +2,11 @@
 term.pid
 _server.log
 *.log
-# persisted UI prefs (theme / font scale) and window position - runtime user state
+# persisted UI prefs (theme / font scale), window position, and installer-resolved
+# runtime paths (node/claude) - machine-specific runtime user state
 app/config.json
 app/host.json
+app/runtime.ini
 edge_profile/
 host/webview2data/
 host/ClaudePet.Host.exe
@@ -16,3 +18,4 @@ dist/
 .DS_Store
 Thumbs.db
 desktop.ini
+/ClaudePet-Setup.exe

@@ -24,12 +24,16 @@
 
 **要求**：Windows 10/11 · Node.js ≥ 18 · Claude Code CLI · Microsoft Edge（Win10/11 自带）
 
+**安装包（推荐）**：双击 `ClaudePet-Setup.exe` → 向导自动检测 Node/Claude，缺失会弹窗警告、可手动指定路径 → 写入 `app\runtime.ini`（PATH 无关）→ 建快捷方式。
+
 ```bat
-:: 1) 解压安装包，双击 install.bat（自动自检 + 复制到 %LOCALAPPDATA%\ClaudePet + 建快捷方式）
-:: 2) 双击桌面 "Claude Pet" 快捷方式
+:: 手动/开发：解压安装包，双击 install.bat（自动自检 + 复制到 %LOCALAPPDATA%\ClaudePet + 建快捷方式）
+:: 双击桌面 "Claude Pet" 快捷方式
 ::    → 终端里启动 claude + 右下角出现桌宠窗
-:: 3) 关闭终端 → 桌宠 5s 内自动退出
+:: 关闭终端 → 桌宠 5s 内自动退出
 ```
+
+> 桌宠即使 PATH 里没有 node/claude，也会凭 `app\runtime.ini` 里的绝对路径启动 —— 不依赖环境变量。
 
 详细说明见 [docs/INSTALL.md](docs/INSTALL.md) 与 [docs/CONFIG.md](docs/CONFIG.md)。
 

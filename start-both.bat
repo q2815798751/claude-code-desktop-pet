@@ -35,11 +35,19 @@ if not defined TERMPID (
   )
 )
 
+rem ---- resolve node path: app\runtime.ini (installer-set) first, else PATH ----
+set "NODE="
+if exist "%~dp0app\runtime.ini" (
+  for /f "usebackq tokens=1,* delims==" %%A in ("%~dp0app\runtime.ini") do if /i "%%A"=="NODE" set "NODE=%%B"
+)
+if defined NODE if not exist "%NODE%" set "NODE="
+if not defined NODE for /f "delims=" %%N in ('where node 2^>nul') do if not defined NODE set "NODE=%%N"
+
 rem ---- 2) pet server (skip if already listening) ----
 curl -s http://127.0.0.1:%PORT%/api/health >nul 2>&1
 if errorlevel 1 (
   echo  [pet] starting server...
-  start "" powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$w = Get-Location; $node = (Get-Command node).Source; Start-Process -FilePath $node -ArgumentList 'app\server.js' -WorkingDirectory $w.Path -WindowStyle Hidden"
+  start "" powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Start-Process -FilePath '%NODE%' -ArgumentList 'app\server.js' -WorkingDirectory '%~dp0' -WindowStyle Hidden"
 )
 
 rem ---- 3) wait for server ----

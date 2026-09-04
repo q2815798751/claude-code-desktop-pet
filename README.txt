@@ -10,9 +10,9 @@ ClaudePet 桌宠 - 快速上手
   · Microsoft Edge     （Win10/11 自带）
 
 【安装】
-  1. 双击 install.bat
-  2. 等待复制完成，桌面和开始菜单会生成 "Claude Pet" 快捷方式
-  3. 双击桌面 "Claude Pet" → 终端启动 claude + 右下角出现桌宠
+  推荐：双击 ClaudePet-Setup.exe（自动检测 node/claude，缺失弹窗警告、可指定路径；免管理员）
+  手动：双击 install.bat，复制完成会生成 "Claude Pet" 快捷方式
+  然后双击桌面 "Claude Pet" → 终端启动 claude + 右下角出现桌宠
 
 【使用】
   · 双击桌宠      激活 claude 终端

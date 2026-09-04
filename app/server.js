@@ -14,6 +14,7 @@ const HTML_FILE = path.join(ROOT, 'pet.html');
 const PS_FILE = path.join(ROOT, 'pet.ps1');
 const TERM_PID_FILE = path.join(ROOT, 'term.pid');
 const CONFIG_FILE = path.join(ROOT, 'config.json');
+const RUNTIME_FILE = path.join(ROOT, 'runtime.ini');
 const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 
 const PORT = 9876;
@@ -55,6 +56,21 @@ try { config = Object.assign(config, JSON.parse(fs.readFileSync(CONFIG_FILE, 'ut
 function saveConfig() {
   try { fs.writeFileSync(CONFIG_FILE, JSON.stringify(config), 'utf8'); } catch {}
 }
+
+// runtime paths (node/claude) written by the installer so the pet works
+// even when PATH has no node/claude. Key=value ASCII in app/runtime.ini.
+function readRuntimeIni() {
+  const map = {};
+  try {
+    const t = fs.readFileSync(RUNTIME_FILE, 'utf8').split(/\r?\n/);
+    for (const line of t) {
+      const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+      if (m) map[m[1].toUpperCase()] = m[2];
+    }
+  } catch {}
+  return map;
+}
+const runtime = readRuntimeIni();
 
 // ---- tiny helpers ----
 function readTermPid() {
@@ -371,6 +387,7 @@ function stateJson() {
     forced: !!forced,
     lastAction: readLastAction(),
     shutdown: shuttingDown,
+    runtime: { node: runtime.NODE || null, claude: runtime.CLAUDE || null },
     ts: now,
   };
 }

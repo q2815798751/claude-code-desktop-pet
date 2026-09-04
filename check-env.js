@@ -24,22 +24,37 @@ function sh(cmd) {
   }
 }
 
+// runtime paths (node/claude) written by the installer; prefer them over PATH
+// so the check still passes when node/claude are not on PATH.
+function rtPath(key) {
+  try {
+    const t = fs.readFileSync(path.join(__dirname, 'app', 'runtime.ini'), 'utf8');
+    for (const line of t.split(/\r?\n/)) {
+      const m = /^\s*(\w+)\s*=\s*(.+?)\s*$/.exec(line);
+      if (m && m[1].toUpperCase() === key) { const p = m[2]; return fs.existsSync(p) ? p : ''; }
+    }
+  } catch {}
+  return '';
+}
+
 lines.push('=================================================');
 lines.push('   CLAUDE.PET - 环境自检  /  Environment Check');
 lines.push('=================================================');
 lines.push('');
 
-// 1. node
-const nodeV = sh('node --version');
+// 1. node (prefer the installer-resolved node.exe so a missing PATH still works)
+const rtNode = rtPath('NODE');
+const nodeV = sh(rtNode ? '"' + rtNode + '" --version' : 'node --version');
 const m = /^v(\d+)/.exec(nodeV);
 const nodeOk = !!m && parseInt(m[1], 10) >= 18;
-add('REQ', nodeOk, 'Node.js >= 18  （当前: ' + (nodeV || '未检测到') + '）',
+add('REQ', nodeOk, 'Node.js >= 18  （当前: ' + (nodeV || '未检测到') + (rtNode ? '  ' + rtNode : '') + '）',
   '下载安装 https://nodejs.org  （装完重开终端）');
 
-// 2. claude code cli
-const claudeV = sh('claude --version');
+// 2. claude code cli (prefer the installer-resolved claude path)
+const rtClaude = rtPath('CLAUDE');
+const claudeV = sh(rtClaude ? '"' + rtClaude + '" --version' : 'claude --version');
 const claudeOk = !!claudeV;
-add('REQ', claudeOk, 'Claude Code CLI  （当前: ' + (claudeV || '未检测到') + '）',
+add('REQ', claudeOk, 'Claude Code CLI  （当前: ' + (claudeV || '未检测到') + (rtClaude ? '  ' + rtClaude : '') + '）',
   'npm i -g @anthropic-ai/claude-code   或   https://claude.com/download');
 
 // 3. edge
