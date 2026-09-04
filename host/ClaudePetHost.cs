@@ -67,13 +67,17 @@ public class MainForm : Form
     {
         int w = GetInt("winW", DEF_W), h = GetInt("winH", DEF_H);
         Size = new Size(Math.Max(120, w), Math.Max(120, h));
+        Rectangle sa = Screen.PrimaryScreen.WorkingArea;
         int x = GetInt("winX", -1), y = GetInt("winY", -1);
         if (x < 0 || y < 0)
         {
-            Rectangle sa = Screen.PrimaryScreen.WorkingArea;
             x = sa.Right - Size.Width - 12;
             y = sa.Bottom - Size.Height - 12;
         }
+        // clamp into the working area so a stale / off-screen saved position
+        // (e.g. after disconnecting a wider monitor) never leaves the pet invisible
+        x = Math.Max(sa.Left, Math.Min(x, sa.Right - Size.Width));
+        y = Math.Max(sa.Top, Math.Min(y, sa.Bottom - Size.Height));
         Location = new Point(x, y);
     }
 
