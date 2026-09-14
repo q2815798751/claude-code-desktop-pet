@@ -5,7 +5,8 @@
 |---|---|---|---|
 | Node.js | ≥ 18 | `node --version` | https://nodejs.org 下载安装，**装完重开终端** |
 | Claude Code CLI | 任意 | `claude --version` | `npm i -g @anthropic-ai/claude-code` 或 https://claude.com/download |
-| Microsoft Edge | 任意 | 检测安装路径 | Win10/11 自带；仅用于桌宠窗口 |
+| WebView2 运行时 | 任意 | 随 Edge 自带 | Win10/11 自带；仅用于桌宠窗口 |
+| `curl.exe` | 任意 | `curl.exe --version` | Win10 1803+ 自带（`C:\Windows\System32`）；**缺了只是 hooks 不工作**，桌宠退回转录推断 |
 | `~/.claude/projects` | — | 目录存在 | 先运行一次 `claude` 自动创建 |
 
 ## 安装包（推荐）
@@ -25,7 +26,8 @@
    - 先跑环境自检（只提示，不阻断安装）；
    - 复制程序到 `%LOCALAPPDATA%\ClaudePet`；
    - **自动编译桌宠窗口宿主 `ClaudePet.Host.exe`**（仓库不内置 exe，用系统自带 .NET Framework `csc` 现编译）；若本机缺 .NET 4.x 会弹窗/停顿提示；
-   - 在**桌面**和**开始菜单**创建 `Claude Pet` 快捷方式（最小化运行）。
+   - 在**桌面**和**开始菜单**创建 `Claude Pet` 快捷方式（最小化运行）；
+   - **挂载 Claude Code hooks**（`node app\hooks.js install`）：往 `~/.claude/settings.json` 里加 8 个事件转发，让桌宠能精确知道"在跑哪个工具 / 在等你"。首次修改前会把原文件备份成 `settings.json.claudepet.bak`，只增删带 `notify.cmd` 标记的条目，**你自己写的 hooks 不会被动**。
 3. 双击桌面 **Claude Pet** 启动。
    - 若缺少 Node.js 18+ 或 Claude Code CLI，会**弹出提示框**并列出缺哪一项；`start-pet.bat` 仅要求 Node。
    - 若直接运行仓库克隆而不走 `install.bat`，首次启动也会自动编译 `ClaudePet.Host.exe`。
@@ -41,7 +43,10 @@
 
 ## 卸载
 双击 `%LOCALAPPDATA%\ClaudePet\uninstall.bat`（或安装包里的 `uninstall.bat`）：
-停掉服务 → 删除桌面/开始菜单快捷方式 → 后台清理安装目录。
+停掉服务 → **摘除 Claude Code hooks**（只删带 `notify.cmd` 标记的条目，你自己的 hooks 原样保留）→ 删除桌面/开始菜单快捷方式 → 后台清理安装目录。
+
+> 手动删掉安装目录而不走卸载脚本，会在 `~/.claude/settings.json` 里留下指向已不存在文件的 hooks。
+> 补救：`node <安装目录>\app\hooks.js remove`，或从 `settings.json.claudepet.bak` 恢复。
 
 ## 常见问题
 | 现象 | 处理 |
@@ -51,5 +56,8 @@
 | 桌宠不见了 / 可能在屏幕外 | 宿主会把你上次保存的位置**自动拉回屏幕内**（3.x 起）；仍跑偏可删掉 `app\host.json` 恢复右下角默认位置 |
 | 状态一直是 OFFLINE | `claude` 没在运行；或装的是 npm 版 claude 且没启动任何会话 |
 | 状态切不过去 | 桌宠上点"调试"按钮强制循环 GIF 验证资源；再点回自动 |
+| 面板 `CLI` 后面没有星号 | hooks 没生效：装完要**重启 claude 会话**；用 `node app\hooks.js status` 确认；`curl.exe` 缺失也会导致 hooks 静默失效 |
+| 工具名不显示，只有 WORKING | 同上（工具名只有 hooks 能给出精确值）；没装 hooks 时至少"现在在做什么"一行仍可用 |
+| hooks 报 "notify.cmd 找不到" | 安装目录被手动删了但 hooks 还在，跑 `node app\hooks.js remove` 摘掉 |
 | 端口 9876 被占用 | 说明已有实例在跑（幂等复用了它），先 `stop-pet.bat` 或关掉旧实例 |
 | 关闭终端后桌宠没退 | 确认终端是通过 `start-both.bat` 拉起的（服务记录其 PID）；手动 `stop-pet.bat` |

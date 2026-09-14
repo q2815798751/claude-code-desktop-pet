@@ -200,16 +200,22 @@ window.__CONFIG__ = __CONFIG_PAYLOAD__;
 <div id="toast"></div>
 
 <script>
-const GIFS = { thinking:'thinking.gif', working:'working.gif', working_long:'workinglong.gif', done:'done.gif', idle:'offlineandidle.gif', offline:'offlineandidle.gif', error:'errorandwaityou.gif' };
+const GIFS = { thinking:'thinking.gif', working:'working.gif', working_long:'workinglong.gif', done:'done.gif', idle:'offlineandidle.gif', awaiting:'offlineandidle.gif', offline:'offlineandidle.gif', error:'errorandwaityou.gif' };
 const STATE_COLORS = {
-  cyber:  { thinking:'#00f0ff', working:'#39ff14', working_long:'#ffb000', done:'#ff00e5', idle:'#8fa8c8', offline:'#ff3b3b', error:'#ff2a2a' },
-  paper:  { thinking:'#2a6f97', working:'#2e7d32', working_long:'#b8860b', done:'#8e44ad', idle:'#7f8c8d', offline:'#c0392b', error:'#c0392b' },
-  matrix: { thinking:'#00ff41', working:'#39ff9b', working_long:'#aaff00', done:'#00e5ff', idle:'#4fbf6f', offline:'#ff2a2a', error:'#ff2a2a' },
-  gold:   { thinking:'#ffd166', working:'#ffb703', working_long:'#fb8500', done:'#e9c46a', idle:'#a58a5a', offline:'#ff6b6b', error:'#ff6b6b' },
-  sunset: { thinking:'#ff6b35', working:'#ffb347', working_long:'#ff8c42', done:'#ff2e88', idle:'#c08a9a', offline:'#ff5a5a', error:'#ff4d4d' },
-  ocean:  { thinking:'#00e5ff', working:'#00ffb3', working_long:'#40c4ff', done:'#7c4dff', idle:'#5a9aa8', offline:'#ff5a5a', error:'#ff4d4d' },
+  cyber:  { thinking:'#00f0ff', working:'#39ff14', awaiting:'#ffcc00', done:'#ff00e5', idle:'#8fa8c8', offline:'#ff3b3b', error:'#ff2a2a' },
+  paper:  { thinking:'#2a6f97', working:'#2e7d32', awaiting:'#c77800', done:'#8e44ad', idle:'#7f8c8d', offline:'#c0392b', error:'#c0392b' },
+  matrix: { thinking:'#00ff41', working:'#39ff9b', awaiting:'#ffee00', done:'#00e5ff', idle:'#4fbf6f', offline:'#ff2a2a', error:'#ff2a2a' },
+  gold:   { thinking:'#ffd166', working:'#ffb703', awaiting:'#ff9f1c', done:'#e9c46a', idle:'#a58a5a', offline:'#ff6b6b', error:'#ff6b6b' },
+  sunset: { thinking:'#ff6b35', working:'#ffb347', awaiting:'#ffd166', done:'#ff2e88', idle:'#c08a9a', offline:'#ff5a5a', error:'#ff4d4d' },
+  ocean:  { thinking:'#00e5ff', working:'#00ffb3', awaiting:'#ffd166', done:'#7c4dff', idle:'#5a9aa8', offline:'#ff5a5a', error:'#ff4d4d' },
 };
-const CN = { thinking:'思考中', working:'工作中', working_long:'长任务', done:'完成', idle:'待命', offline:'离线', error:'异常' };
+const CN = { thinking:'思考中', working:'工作中', awaiting:'等待输入', done:'完成', idle:'待命', offline:'离线', error:'异常' };
+// tool name -> 中文（与 server.js 的 TOOL_LABELS 保持一致，仅用于状态行）
+const TOOL_CN = {
+  Bash:'运行命令', Edit:'编辑文件', Read:'读取文件', Write:'写文件', Glob:'查找文件', Grep:'搜索代码',
+  NotebookEdit:'编辑笔记', WebSearch:'联网搜索', WebFetch:'抓取网页', Agent:'调用子代理',
+  TaskCreate:'创建任务', TodoWrite:'更新任务', Skill:'调用技能',
+};
 const THEMES = ['cyber','paper','matrix','gold','sunset','ocean'];
 const THEME_NAMES = { cyber:'CYBER', paper:'PAPER', matrix:'MATRIX', gold:'GOLD', sunset:'SUNSET', ocean:'OCEAN' };
 const FS_MIN = 0.85, FS_MAX = 1.35;
@@ -260,46 +266,63 @@ function setMode(m){
 }
 
 // ---- state ----
-function applyState(s){
+function applyState(j){
+  const s = j.state || 'offline';
   const pal = STATE_COLORS[theme] || STATE_COLORS.cyber;
   const color = pal[s] || pal.thinking;
   setVar('--st', color);
   led.style.background = color; led.style.boxShadow = '0 0 8px ' + color;
-  stateEl.textContent = (s||'boot').toUpperCase();
-  stateCn.textContent = CN[s] || '';
-  ballStatus.textContent = CN[s] || '';
+
+  // a running tool says more than the word "WORKING"
+  const tool = (s === 'working' && j.tool) ? j.tool : '';
+  stateEl.textContent = (tool || s).toUpperCase();
+  stateCn.textContent = tool ? (CN[s] + ' · ' + (TOOL_CN[tool] || tool)) : (CN[s] || '');
+  ballStatus.textContent = tool ? (TOOL_CN[tool] || tool) : (CN[s] || '');
   petImg.classList.toggle('dim', s === 'offline');
-  if (s !== lastGif){
-    lastGif = s; bust++;
-    const g = 'gifs/' + (GIFS[s] || GIFS.idle) + '?v=' + bust;
+
+  const gifKey = (s === 'working' && j.long) ? 'working_long' : s;
+  if (gifKey !== lastGif){
+    lastGif = gifKey; bust++;
+    const g = 'gifs/' + (GIFS[gifKey] || GIFS.idle) + '?v=' + bust;
     ballPet.src = g; petImg.src = g;
   }
-  // notifications on transitions
-  if (prevState === 'working_long' && s === 'done') notify('任务完成');
-  if (s === 'error') notify('工具出错，请查看');
+  // Notifications fire on the EDGE only. This used to re-trigger on every poll,
+  // so an 'error' state beeped twice a second for as long as it lasted.
+  if (s !== prevState){
+    if (s === 'error') notify('工具出错，请查看');
+    else if (s === 'awaiting') notify('Claude 在等你');
+    else if (s === 'done' && (prevState === 'working' || prevState === 'working_long')) notify('任务完成');
+  }
   prevState = s;
 }
 function notify(msg){ toastMsg(msg); beep(); }
+// One AudioContext for the whole page. Creating one per beep leaked, and the
+// browser starts throwing after a handful of them (the pet went silent).
+let audioCtx = null;
 function beep(){
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
-    const ctx = new Ctx(); const o = ctx.createOscillator(); const g = ctx.createGain();
-    o.connect(g); g.connect(ctx.destination); o.frequency.value = 880; g.gain.value = 0.08;
-    o.start(); o.stop(ctx.currentTime + 0.18);
+    if (!audioCtx) audioCtx = new Ctx();
+    if (audioCtx.state === 'suspended' && audioCtx.resume) audioCtx.resume();
+    const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+    o.connect(g); g.connect(audioCtx.destination); o.frequency.value = 880; g.gain.value = 0.08;
+    o.start(); o.stop(audioCtx.currentTime + 0.18);
   } catch(_){}
 }
 
 // ---- theme / font / config ----
+// The server owns the preferences (app/config.json) and hands them back through
+// __CONFIG__ on every load, so the page keeps no copy of its own. It used to
+// write localStorage as well — two sources that disagreed after a manual edit.
 function persistConfig(){
-  try { localStorage.setItem('pet_theme', theme); localStorage.setItem('pet_fs', String(fs)); } catch(_){}
   try { fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({theme, fs})}).catch(()=>{}); } catch(_){}
 }
 function applyTheme(t){
   theme = t;
   document.documentElement.setAttribute('data-theme', t);
   titleTxt.innerHTML = '<b>C:\\&gt;</b> CLAUDE.PET // ' + (THEME_NAMES[t] || 'CYBER');
-  if (lastState) applyState(lastState.state);
+  if (lastState) applyState(lastState);
   persistConfig();
 }
 function cycleTheme(){ applyTheme(THEMES[(THEMES.indexOf(theme)+1) % THEMES.length]); toastMsg('THEME ' + THEME_NAMES[theme]); }
@@ -317,20 +340,49 @@ function tick(){
 
 function render(json){
   lastState = json;
-  applyState(json.state);
-  cliEl.textContent = json.claude ? 'ON' : 'OFF';
+  applyState(json);
+  // CLI ON* means the Claude Code hooks are feeding us (exact phase); without the
+  // star the pet is inferring the phase from the transcript alone.
+  cliEl.textContent = (json.claude ? 'ON' : 'OFF') + (json.hooked ? '*' : '');
+  cliEl.title = json.hooked ? 'hooks 已接入' : 'hooks 未接入（回退到转录推断）';
   termEl.textContent = json.term ? (json.termAlive ? 'PID ' + json.term : 'GONE') : '--';
   forcedTag.textContent = json.forced ? '[DBG]' : '';
   if (json.lastAction) nowEl.textContent = json.lastAction;
 }
 
-async function poll(){
-  try {
-    const r = await fetch('/api/state', {cache:'no-store'});
-    const j = await r.json();
-    if (j.shutdown){ persistConfig(); callHost('Close'); window.close(); return; }
-    render(j);
-  }catch(e){ try { window.close(); }catch(_){} }
+function dismiss(){ persistConfig(); callHost('Close'); try { window.close(); } catch(_){} }
+function handleState(j){
+  if (j.shutdown){ dismiss(); return; }
+  render(j);
+}
+// A dropped connection must not kill the pet: the old code closed the window on
+// the very first failed poll, so restarting the server took the pet with it.
+let fails = 0;
+function noteFail(){ if (++fails >= 6) dismiss(); }
+
+// Live state over SSE — the server pushes a frame when something actually changes.
+// (Polling /api/state twice a second was the old way; it is kept only as fallback.)
+let es = null, pollTimer = null;
+function startPolling(){
+  if (pollTimer) return;
+  pollTimer = setInterval(async () => {
+    try {
+      const r = await fetch('/api/state', {cache:'no-store'});
+      fails = 0;
+      handleState(await r.json());
+    } catch(_){ noteFail(); }
+  }, 1000);
+}
+function connect(){
+  if (!window.EventSource) return startPolling();
+  try { es = new EventSource('/events'); } catch(_){ return startPolling(); }
+  es.addEventListener('state', (e) => {
+    fails = 0;
+    try { handleState(JSON.parse(e.data)); } catch(_){}
+  });
+  es.onerror = () => { noteFail(); }; // EventSource retries on its own
+  // if the stream is unusable, a slow poll still keeps the pet honest
+  setTimeout(() => { if (fails && !pollTimer) startPolling(); }, 20000);
 }
 function api(path){ return fetch(path, {method:'POST'}).catch(()=>{}); }
 
@@ -439,18 +491,16 @@ window.addEventListener('pagehide', persistConfig);
     const cfg = window.__CONFIG__ || {};
     if (cfg.theme && THEMES.indexOf(cfg.theme) !== -1) st = cfg.theme;
     if (typeof cfg.fs === 'number') sf = cfg.fs;
-    const t = localStorage.getItem('pet_theme'); if (t && THEMES.indexOf(t) !== -1) st = t;
-    const f = parseFloat(localStorage.getItem('pet_fs')); if (isFinite(f)) sf = f;
   } catch(_){}
   theme = st; fs = Math.min(FS_MAX, Math.max(FS_MIN, sf));
   applyTheme(theme); applyFs(fs);
   setMode('ball');                       // start as a compact ball
   render(window.__INIT__ || {});
   tick();
+  connect();
 })();
 
 setInterval(tick, 1000);
-setInterval(poll, 500);
 </script>
 </body>
 </html>

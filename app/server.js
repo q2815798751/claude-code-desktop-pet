@@ -1,6 +1,11 @@
 // CLAUDE.PET server — zero external dependencies (Node built-ins only)
 // Windows desktop pet that reflects claude code CLI working state.
-// HTTP server @127.0.0.1:9876, SSR injects init state, client polls every 500ms.
+// HTTP server @127.0.0.1:9876, SSR injects init state, client follows /events (SSE).
+//
+// Signals, best first:
+//   1. Claude Code hooks POSTed to /event  — exact phase, zero polling cost
+//   2. the newest transcript in ~/.claude/projects — works with no hooks installed
+//   3. a process probe — only to settle "is an idle session still there?"
 'use strict';
 
 const http = require('http');
@@ -8,6 +13,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { exec, execFile } = require('child_process');
+const st = require('./state');
+const transcript = require('./transcript');
+const { safeJson } = require('./util');
 
 const ROOT = __dirname;
 const HTML_FILE = path.join(ROOT, 'pet.html');
@@ -15,42 +23,63 @@ const PS_FILE = path.join(ROOT, 'pet.ps1');
 const TERM_PID_FILE = path.join(ROOT, 'term.pid');
 const CONFIG_FILE = path.join(ROOT, 'config.json');
 const RUNTIME_FILE = path.join(ROOT, 'runtime.ini');
-const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
+const PROJECTS_DIR = transcript.DEFAULT_DIR;
 
-const PORT = 9876;
+const PORT = parseInt(process.env.CLAUDEPET_PORT, 10) || 9876;
 const HOST = '127.0.0.1';
+// Only for running a second pet next to a live one (tests). The host window and
+// notify.cmd both point at 9876, so leave it alone in normal use.
+const ORIGINS = [`${HOST}:${PORT}`, `localhost:${PORT}`];
 
 // state thresholds (ms)
-const THINK_MS = 5000;        // thinking  <5s of continuous activity
-const WORK_MS = 30000;        // working   <30s
-const DONE_HOLD_MS = 5000;    // done state holds 5s
-const STALE_MS = 600000;      // a working marker older than this is treated as idle (safety)
-const SHUTDOWN_HOLD_MS = 2500;// self-exit within 5s of terminal death
-const ERROR_WINDOW_MS = 30000;// recent tool error within 30s -> error state
-const PROC_CHECK_MS = 2000;   // re-run tasklist at most every 2s
-const WINDOW_STALE_MS = 5000; // pet window considered alive if polled within 5s
-const TAIL_BYTES = 256 * 1024;// bytes read from the tail of the newest transcript
+const DONE_HOLD_MS = 5000;     // done state holds 5s
+const SHUTDOWN_HOLD_MS = 2500; // self-exit within 5s of terminal death
+const WINDOW_STALE_MS = 5000;  // pet window considered alive if seen within 5s
+const PROBE_INTERVAL_MS = 8000;// re-run the process probe at most every 8s
+const HEARTBEAT_MS = 15000;    // SSE keep-alive
+
+const CFG = Object.assign({}, st.DEFAULTS, {
+  DONE_HOLD_MS,
+  SESSION_TTL_MS: st.DEFAULTS.SESSION_TTL_MS,
+  DEAD_GRACE_MS: st.DEFAULTS.DEAD_GRACE_MS,
+  ACTIVITY_FRESH_MS: st.DEFAULTS.ACTIVITY_FRESH_MS,
+});
 
 const GIF_EXT = { '.gif': 'image/gif', '.png': 'image/png', '.ico': 'image/x-icon' };
 
+// The most recent tool action (for the "现在在做什么" line).
+const TOOL_LABELS = {
+  Bash: '运行 Bash', Edit: '编辑文件', Read: '读取文件', Write: '写文件',
+  Glob: '查找文件', Grep: '搜索代码', NotebookEdit: '编辑笔记', WebSearch: '联网搜索',
+  WebFetch: '抓取网页', Agent: '调用子代理', TaskCreate: '创建任务', TodoWrite: '更新任务',
+  Skill: '调用技能',
+};
+
 // ---- mutable state ----
-let claudeAlive = null;
-let termAlive = null;
-let lastProcCheck = 0;
-let lastActivity = 0;          // ms epoch of the last transcript event (for display)
-let turnStart = 0;             // when the current working stretch began
-let wasWorking = false;
-let doneUntil = 0;
-let state = 'offline';
-let stateSince = Date.now();
-let forced = null;             // debug override: 'auto' | a state name
-let lastError = null;          // {at, msg}
+let pet = st.initState(Date.now());
+// Last complete fact set handed to the reducer. /api/debug re-reduces against
+// this instead of a partial one, so forcing a state can't accidentally wipe the
+// live signal (a missing claudeAlive reads as "offline").
+let lastFacts = { now: Date.now(), claudeAlive: false, shuttingDown: false, forced: null, activity: null, error: null };
+let forced = null;             // debug override: a state name, or null for auto
 let shuttingDown = false;
 let shutdownAt = 0;
-let windowActiveAt = 0;
-let termPid = readTermPid();
+let lastActivity = 0;
+let lastAction = '';
+let lastError = null;
+let windowSeenAt = 0;
 
-// persisted UI config (theme + font scale)
+// process probe
+let procAlive = null;          // null = not probed yet
+let lastProbeAt = 0;
+
+// hook sessions
+const hookSessions = new Map(); // session_id -> lastAt
+let hookEnabled = false;        // a hook event has been received at least once
+let lastHookAt = 0;
+let lastHookActivity = null;    // { kind, ts, tool }
+
+// ---- persisted UI config (server is the single source of truth) ----
 let config = { theme: 'cyber', fs: 1 };
 try { config = Object.assign(config, JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'))); } catch {}
 function saveConfig() {
@@ -80,108 +109,11 @@ function readTermPid() {
     return Number.isFinite(n) && n > 0 ? n : null;
   } catch { return null; }
 }
+let termPid = readTermPid();
+let termAlive = null;
 
-function scanLatestMtime() {
-  let m = 0;
-  let dirs = [];
-  try { dirs = fs.readdirSync(PROJECTS_DIR); } catch { return m; }
-  for (const proj of dirs) {
-    const d = path.join(PROJECTS_DIR, proj);
-    try { if (!fs.statSync(d).isDirectory()) continue; } catch { continue; }
-    let files = [];
-    try { files = fs.readdirSync(d); } catch { continue; }
-    for (const f of files) {
-      if (!f.endsWith('.jsonl')) continue;
-      try {
-        const st = fs.statSync(path.join(d, f));
-        if (st.mtimeMs > m) m = st.mtimeMs;
-      } catch {}
-    }
-  }
-  return m;
-}
 
-function newestTranscriptPath() {
-  let best = null, bestT = 0;
-  try {
-    for (const proj of fs.readdirSync(PROJECTS_DIR)) {
-      const d = path.join(PROJECTS_DIR, proj);
-      try { if (!fs.statSync(d).isDirectory()) continue; } catch { continue; }
-      for (const f of fs.readdirSync(d)) {
-        if (!f.endsWith('.jsonl')) continue;
-        const p = path.join(d, f);
-        try { const st = fs.statSync(p); if (st.mtimeMs > bestT) { bestT = st.mtimeMs; best = p; } } catch {}
-      }
-    }
-  } catch {}
-  return best;
-}
-
-function scanRecentError(now) {
-  const file = newestTranscriptPath();
-  if (!file) return null;
-  try {
-    const size = fs.statSync(file).size;
-    if (size === 0) return null;
-    const start = Math.max(0, size - 128 * 1024);
-    const fd = fs.openSync(file, 'r');
-    const buf = Buffer.alloc(size - start);
-    try { fs.readSync(fd, buf, 0, buf.length, start); } finally { fs.closeSync(fd); }
-    const lines = buf.toString('utf8').split('\n');
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
-      if (!line.startsWith('{')) continue;
-      if (!/"isError"\s*:\s*true/.test(line)) continue;
-      let ts;
-      try {
-        const o = JSON.parse(line);
-        ts = o.timestamp ? new Date(o.timestamp).getTime() : NaN;
-      } catch { ts = NaN; }
-      if (Number.isFinite(ts) && now - ts <= ERROR_WINDOW_MS) {
-        return { at: ts, msg: 'tool error' };
-      }
-      // if the newest error line is older than the window, nothing recent
-      if (Number.isFinite(ts) && now - ts > ERROR_WINDOW_MS) return null;
-    }
-  } catch {}
-  return null;
-}
-
-// The most recent tool action (for the "现在在做什么" line).
-const TOOL_LABELS = {
-  Bash: '运行 Bash', Edit: '编辑文件', Read: '读取文件', Write: '写文件',
-  Glob: '查找文件', Grep: '搜索代码', NotebookEdit: '编辑笔记', WebSearch: '联网搜索',
-  WebFetch: '抓取网页', Agent: '调用子代理', TaskCreate: '创建任务', TodoWrite: '更新任务',
-  Skill: '调用技能',
-};
-function readLastAction() {
-  const file = newestTranscriptPath();
-  if (!file) return '';
-  try {
-    const size = fs.statSync(file).size;
-    if (size === 0) return '';
-    const start = Math.max(0, size - 128 * 1024);
-    const fd = fs.openSync(file, 'r');
-    const buf = Buffer.alloc(size - start);
-    try { fs.readSync(fd, buf, 0, buf.length, start); } finally { fs.closeSync(fd); }
-    const lines = buf.toString('utf8').split('\n');
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
-      if (!line.startsWith('{')) continue;
-      let o;
-      try { o = JSON.parse(line); } catch { continue; }
-      const content = o.message && o.message.content;
-      if (!Array.isArray(content)) continue;
-      for (let j = content.length - 1; j >= 0; j--) {
-        const c = content[j];
-        if (c && c.type === 'tool_use' && c.name) return TOOL_LABELS[c.name] || c.name;
-      }
-    }
-  } catch {}
-  return '';
-}
-
-// ---- process checks (spawn tasklist, cached every PROC_CHECK_MS) ----
+// ---- process probe (only to settle a quiet session; skipped while active) ----
 function run(cmd) {
   return new Promise((resolve) => {
     exec(cmd, { windowsHide: true, timeout: 4000 }, (err, stdout) => {
@@ -190,7 +122,7 @@ function run(cmd) {
   });
 }
 
-function claudeAliveCheck() {
+function probeClaude() {
   // claude.exe (native / WinGet) OR node.exe running the Claude Code CLI (npm install).
   // Exclude our own server process (command line contains 'server.js') so an install
   // under a path like ...\ClaudePet\app\server.js is never a false positive.
@@ -209,123 +141,105 @@ function pidAliveCheck(pid) {
     .then((out) => out.includes(String(pid)));
 }
 
-async function updateProcesses() {
-  const tasks = [claudeAliveCheck()];
-  if (termPid) tasks.push(pidAliveCheck(termPid));
-  const [c, t] = await Promise.all(tasks);
-  claudeAlive = !!c;
-  if (termPid) termAlive = !!t;
+// A transcript write within the freshness window proves claude is running, so the
+// probe is skipped entirely while claude is actually working. That is when the
+// probe would have been pure waste — and it is the common case.
+function shouldProbe(now) {
+  if (lastHookAt && now - lastHookAt < CFG.ACTIVITY_FRESH_MS) return false;
+  if (lastActivity && now - lastActivity < CFG.ACTIVITY_FRESH_MS) return false;
+  return now - lastProbeAt > PROBE_INTERVAL_MS;
 }
 
-// ---- transcript content classification ----
-// Claude Code appends one JSONL line per message EVENT (user input, tool_result,
-// assistant thinking/text/tool_use), but does NOT write during long text streaming.
-// So the last meaningful line tells us the phase: working markers (user/tool/thinking/
-// tool_use) mean claude is mid-turn; a pure-text assistant line means the turn finished.
-function classifyMessage(o) {
-  const t = o.type || '';
-  const role = (o.message && o.message.role) || '';
-  const content = o.message && o.message.content;
-  const kinds = Array.isArray(content) ? content.map((c) => (c && c.type) || '') : [];
-  if (t === 'user') return 'working'; // input or tool_result -> claude is mid-turn
-  if (t === 'assistant' || role === 'assistant') {
-    if (kinds.includes('thinking') || kinds.includes('tool_use')) return 'working';
-    if (kinds.includes('text')) {
-      const nonText = kinds.filter((k) => k && k !== 'text');
-      return nonText.length === 0 ? 'done' : 'working'; // pure text = turn finished
+async function updateProcesses(now) {
+  if (!shouldProbe(now)) {
+    if (lastHookAt && now - lastHookAt < CFG.ACTIVITY_FRESH_MS) procAlive = true;
+    else if (lastActivity && now - lastActivity < CFG.ACTIVITY_FRESH_MS) procAlive = true;
+  } else {
+    lastProbeAt = now;
+    const tasks = [probeClaude()];
+    if (termPid) tasks.push(pidAliveCheck(termPid));
+    const [c, t] = await Promise.all(tasks);
+    procAlive = !!c;
+    if (termPid) termAlive = !!t;
+  }
+}
+
+// ---- hook events ----
+function pruneSessions(now) {
+  for (const [id, at] of hookSessions) {
+    if (now - at > CFG.SESSION_TTL_MS) hookSessions.delete(id);
+  }
+}
+
+function onHookEvent(body, now) {
+  const name = String(body.hook_event_name || '');
+  const sid = String(body.session_id || '');
+  hookEnabled = true;
+  lastHookAt = now;
+
+  if (name === 'SessionEnd') {
+    if (sid) hookSessions.delete(sid);
+    if (!hookSessions.size) { lastHookActivity = null; lastProbeAt = 0; } // re-probe now
+  } else if (sid) {
+    hookSessions.set(sid, now);
+  }
+
+  switch (name) {
+    case 'SessionStart':     lastHookActivity = null; break;
+    case 'UserPromptSubmit': lastHookActivity = { kind: 'thinking', ts: now, tool: '' }; break;
+    case 'PreToolUse':       lastHookActivity = { kind: 'working', ts: now, tool: String(body.tool_name || '') }; break;
+    case 'PostToolUse':      lastHookActivity = { kind: 'thinking', ts: now, tool: '' }; break;
+    case 'Notification':     lastHookActivity = { kind: 'awaiting', ts: now, tool: '' }; break;
+    case 'Stop':
+    case 'SubagentStop':     lastHookActivity = { kind: 'done', ts: now, tool: '' }; break;
+    case 'SessionEnd':       lastHookActivity = null; break;
+    default: break;
+  }
+}
+
+// Hooks know the phase exactly; the transcript is the fallback.
+//
+// A fresh hook event is authoritative. Comparing timestamps alone is not enough:
+// the transcript line for the same moment is written at almost the same instant,
+// so a few hundred ms of skew would let the coarse transcript reading shadow the
+// precise hook one — and the tool name would flicker away. Once the hooks go
+// quiet (not installed, or another session is the one writing) whichever saw
+// something more recently wins.
+const HOOK_PREF_MS = 3000;
+function currentActivity(snap, now) {
+  const fromTranscript = snap.msg
+    ? { kind: snap.msg.kind, ts: snap.msg.ts, tool: '', src: 'transcript' }
+    : null;
+  if (lastHookActivity) {
+    if (now - lastHookActivity.ts < HOOK_PREF_MS) return Object.assign({ src: 'hook' }, lastHookActivity);
+    if (!fromTranscript || lastHookActivity.ts >= fromTranscript.ts) {
+      return Object.assign({ src: 'hook' }, lastHookActivity);
     }
-    return 'working';
   }
-  return null; // metadata / other lines are skipped
+  return fromTranscript;
 }
 
-function readLastMessage() {
-  const file = newestTranscriptPath();
-  if (!file) return null;
-  try {
-    const size = fs.statSync(file).size;
-    if (size === 0) return null;
-    const start = Math.max(0, size - TAIL_BYTES);
-    const fd = fs.openSync(file, 'r');
-    const buf = Buffer.alloc(size - start);
-    try { fs.readSync(fd, buf, 0, buf.length, start); } finally { fs.closeSync(fd); }
-    const text = buf.toString('utf8');
-    const partial = text.length > 0 && text.charAt(text.length - 1) !== '\n';
-    const lines = text.split('\n');
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
-      if (!line.startsWith('{')) continue;
-      let o;
-      try { o = JSON.parse(line); } catch { continue; }
-      const ts = o.timestamp ? new Date(o.timestamp).getTime() : NaN;
-      if (!Number.isFinite(ts)) continue; // metadata line, skip
-      const kind = classifyMessage(o);
-      if (!kind) continue;
-      return { kind, ts };
-    }
-    if (partial) return { kind: 'working', ts: Date.now() }; // mid-append = actively writing
-  } catch {}
-  return null;
-}
-
-// ---- state machine ----
-function computeState(now, msg) {
-  if (shuttingDown) { state = 'offline'; return; }
-  if (forced && forced !== 'auto') { if (state !== forced) { state = forced; stateSince = now; } return; }
-
-  // error overrides working states (still needs claude alive)
-  if (lastError && claudeAlive) {
-    if (state !== 'error') { state = 'error'; stateSince = now; wasWorking = false; }
-    return;
-  }
-
-  if (!claudeAlive) {
-    wasWorking = false;
-    if (state !== 'offline') { state = 'offline'; stateSince = now; }
-    return;
-  }
-
-  if (!msg) {
-    // claude alive but no transcript yet (fresh install / never ran in a project)
-    wasWorking = false;
-    if (state !== 'idle') { state = 'idle'; stateSince = now; }
-    return;
-  }
-
-  if (msg.kind === 'done') {
-    // turn finished: assistant pure text -> flash done 5s, then idle
-    if (wasWorking) { doneUntil = now + DONE_HOLD_MS; wasWorking = false; }
-    const s = now < doneUntil ? 'done' : 'idle';
-    if (state !== s) { state = s; stateSince = now; }
-    return;
-  }
-
-  // working marker: claude is mid-turn (user input / tool_result / thinking / tool_use)
-  if (!wasWorking) { turnStart = msg.ts || now; wasWorking = true; }
-  if (msg.ts && (now - msg.ts) > STALE_MS) {
-    // safety: marker very old with no follow-up -> not really active anymore
-    wasWorking = false;
-    if (state !== 'idle') { state = 'idle'; stateSince = now; }
-    return;
-  }
-  const dur = now - turnStart;
-  const s = dur < THINK_MS ? 'thinking' : dur < WORK_MS ? 'working' : 'working_long';
-  if (state !== s) { state = s; stateSince = now; }
-}
-
+// ---- poll loop ----
 function beginShutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   shutdownAt = Date.now();
-  state = 'offline';
-  stateSince = shutdownAt;
-  // graceful: client polls shutdown:true and calls host Close + window.close();
+  lastFacts = Object.assign({}, lastFacts, { now: shutdownAt, shuttingDown: true });
+  pet = st.reduce(pet, lastFacts, CFG);
+  broadcast(true);
+  // graceful: client sees shutdown:true and calls host Close + window.close();
   // fallback: force-close the pet host window so it never lingers.
   setTimeout(killPetWindow, 800);
 }
 
+function killPetWindow() {
+  execFile('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
+    "Get-Process -Name 'ClaudePet.Host' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue"
+  ], { windowsHide: true }, () => {});
+}
+
 function windowActive() {
-  return (Date.now() - windowActiveAt) < WINDOW_STALE_MS;
+  return sseClients.size > 0 || (Date.now() - windowSeenAt) < WINDOW_STALE_MS;
 }
 
 // ---- PowerShell window ops (execFile avoids cmd mangling of Unicode paths) ----
@@ -337,14 +251,7 @@ function psRun(action, pid) {
   });
 }
 
-// ---- poll loop ----
-function killPetWindow() {
-  execFile('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command',
-    "Get-Process -Name 'ClaudePet.Host' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue"
-  ], { windowsHide: true }, () => {});
-}
-
-async function poll() {
+async function tick() {
   const now = Date.now();
 
   // adopt a (possibly new) terminal pid written by start-both.bat
@@ -352,49 +259,77 @@ async function poll() {
   if (newPid !== termPid) {
     termPid = newPid;
     termAlive = null;          // unknown until checked
-    lastProcCheck = 0;         // force a process check this poll
+    lastProbeAt = 0;           // force a probe this tick
   }
+  if (termPid && termAlive === null) lastProbeAt = 0;
 
-  if (now - lastProcCheck > PROC_CHECK_MS) {
-    lastProcCheck = now;
-    await updateProcesses();
-  }
-  const msg = readLastMessage();
-  lastActivity = msg ? msg.ts : scanLatestMtime();
-  lastError = scanRecentError(now);
-  computeState(now, msg);
+  pruneSessions(now);
+
+  const snap = transcript.snapshot({ now });
+  const activity = currentActivity(snap, now);
+  const actTs = Math.max(snap.mtime, lastHookAt, snap.msg ? snap.msg.ts : 0);
+  if (actTs) lastActivity = actTs;
+  lastError = snap.error;
+  lastAction = (activity && activity.tool) ? activity.tool : (snap.tool || '');
+
+  await updateProcesses(now);
+
+  const alive = st.computeAlive({
+    now,
+    procAlive,
+    hookSessions: [...hookSessions].map(([id, at]) => ({ id, lastAt: at })),
+  });
+
+  lastFacts = {
+    now,
+    claudeAlive: alive,
+    shuttingDown,
+    forced,
+    activity,
+    error: lastError,
+  };
+  pet = st.reduce(pet, lastFacts, CFG);
+
+  broadcast(false);
 
   // terminal died -> pet self-exits within 5s (only when we know it is dead)
   if (!shuttingDown && termPid && termAlive === false) beginShutdown();
-  if (shuttingDown && now - shutdownAt >= SHUTDOWN_HOLD_MS) {
-    process.exit(0);
-  }
+  if (shuttingDown && now - shutdownAt >= SHUTDOWN_HOLD_MS) process.exit(0);
 }
 
-setInterval(() => { poll().catch(() => {}); }, 500);
+setInterval(() => { tick().catch(() => {}); }, 500);
 
 // ---- HTTP ----
 function stateJson() {
   const now = Date.now();
   return {
-    state,
-    since: stateSince,
+    state: pet.state,
+    since: pet.since,
+    tool: pet.tool || '',
+    long: !!pet.long,
     lastActivity,
     ageMs: Math.max(0, now - lastActivity),
-    claude: claudeAlive,
+    claude: !!lastFacts.claudeAlive,
+    hooked: hookEnabled,
     term: termPid,
     termAlive: termAlive === null ? null : !!termAlive,
     forced: !!forced,
-    lastAction: readLastAction(),
+    lastAction: TOOL_LABELS[lastAction] || lastAction || '',
+    error: !!lastError,
     shutdown: shuttingDown,
     runtime: { node: runtime.NODE || null, claude: runtime.CLAUDE || null },
     ts: now,
   };
 }
 
-function json(res, obj) {
+function stateSig(s) {
+  return [s.state, s.tool, s.long, s.claude, s.hooked, s.termAlive, s.lastAction, s.error, s.shutdown, s.forced].join('|');
+}
+let lastSig = '';
+
+function json(res, obj, code) {
   const body = JSON.stringify(obj);
-  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.writeHead(code || 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(body);
 }
 
@@ -403,9 +338,8 @@ function serveHtml(res) {
   try { html = fs.readFileSync(HTML_FILE, 'utf8'); } catch {
     res.writeHead(500); res.end('pet.html missing'); return;
   }
-  const init = JSON.stringify(stateJson());
-  html = html.replace('__INIT_PAYLOAD__', init);
-  html = html.replace('__CONFIG_PAYLOAD__', JSON.stringify(config));
+  html = html.replace('__INIT_PAYLOAD__', safeJson(stateJson()));
+  html = html.replace('__CONFIG_PAYLOAD__', safeJson(config));
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(html);
 }
@@ -419,6 +353,61 @@ function serveFile(res, name) {
   fs.createReadStream(file).pipe(res);
 }
 
+// SSE — one push per actual change instead of two polls a second.
+const sseClients = new Set();
+
+function sseHandler(req, res) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write(': connected\n\n');
+  sseClients.add(res);
+  windowSeenAt = Date.now();
+  const s = stateJson();
+  lastSig = stateSig(s);
+  res.write('event: state\ndata: ' + JSON.stringify(s) + '\n\n');
+  req.on('close', () => sseClients.delete(res));
+}
+
+function broadcast(force) {
+  if (!sseClients.size) { lastSig = ''; return; }
+  const s = stateJson();
+  const sig = stateSig(s);
+  if (!force && sig === lastSig) return;
+  lastSig = sig;
+  windowSeenAt = Date.now();
+  const frame = 'event: state\ndata: ' + JSON.stringify(s) + '\n\n';
+  for (const c of sseClients) { try { c.write(frame); } catch { sseClients.delete(c); } }
+}
+
+setInterval(() => {
+  for (const c of sseClients) { try { c.write(': hb\n\n'); } catch { sseClients.delete(c); } }
+}, HEARTBEAT_MS);
+
+// The pet page is same-origin (http://127.0.0.1:9876); hooks and curl send no
+// Origin at all. Anything else is a drive-by from a web page.
+function originAllowed(req) {
+  const o = req.headers.origin;
+  if (o !== undefined) {
+    let host;
+    try { host = new URL(o).host; } catch { return false; }
+    if (ORIGINS.indexOf(host) === -1) return false;
+  }
+  const h = req.headers.host;
+  if (h && ORIGINS.indexOf(h) === -1) return false;
+  return true;
+}
+
+function readBody(req, limit, cb) {
+  let body = '';
+  req.on('data', (c) => { body += c; if (body.length > limit) req.destroy(); });
+  req.on('end', () => cb(body));
+  req.on('error', () => cb(''));
+}
+
 const server = http.createServer((req, res) => {
   let u;
   try { u = new URL(req.url, `http://${HOST}:${PORT}`); } catch { res.writeHead(400); res.end(); return; }
@@ -427,55 +416,60 @@ const server = http.createServer((req, res) => {
 
   try {
     if (req.method === 'GET' && p === '/') return serveHtml(res);
-    if (req.method === 'GET' && p === '/api/state') { windowActiveAt = Date.now(); return json(res, stateJson()); }
-    if (req.method === 'GET' && p === '/api/health') return json(res, { server: true, window: windowActive(), state, shutdown: shuttingDown });
+    if (req.method === 'GET' && p === '/events') {
+      if (!originAllowed(req)) { res.writeHead(403); res.end('forbidden'); return; }
+      return sseHandler(req, res);
+    }
+    if (req.method === 'GET' && p === '/api/state') { windowSeenAt = Date.now(); return json(res, stateJson()); }
+    if (req.method === 'GET' && p === '/api/health') return json(res, { server: true, window: windowActive(), state: pet.state, shutdown: shuttingDown, hooked: hookEnabled });
     if (req.method === 'GET' && p === '/api/window') { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end(windowActive() ? '1' : '0'); return; }
 
-    if (req.method === 'POST' && p === '/api/open') {
-      psRun('open');
-      return json(res, { ok: true });
-    }
-    if (req.method === 'POST' && p === '/api/focus') {
-      psRun('focus', termPid);
-      return json(res, { ok: true });
-    }
-    if (req.method === 'POST' && p === '/api/terminal') {
-      const a = q.get('act');
-      const act = (a === 'restore' || a === 'toggle') ? a : 'min';
-      psRun(act, termPid);
-      return json(res, { ok: true });
-    }
-    if (req.method === 'POST' && p === '/api/config') {
-      let body = '';
-      req.on('data', (c) => { body += c; if (body.length > 1024) req.destroy(); });
-      req.on('end', () => {
-        try {
-          const c = JSON.parse(body || '{}');
-          if (typeof c.theme === 'string') config.theme = c.theme;
-          if (typeof c.fs === 'number') config.fs = Math.min(1.35, Math.max(0.85, c.fs));
-          saveConfig();
-          return json(res, { ok: true, config });
-        } catch { return json(res, { ok: false }); }
-      });
-      return;
-    }
-    if (req.method === 'POST' && p === '/api/debug') {
-      if (q.has('cycle')) {
-        const list = ['auto', 'thinking', 'working', 'working_long', 'done', 'idle', 'offline', 'error'];
-        const idx = list.indexOf(forced || 'auto');
-        forced = list[(idx + 1) % list.length];
-      } else if (q.has('state')) {
-        const s = q.get('state');
-        forced = s === 'auto' ? null : s;
-      } else {
-        forced = forced ? null : 'thinking';
+    if (req.method === 'POST') {
+      if (!originAllowed(req)) return json(res, { ok: false, error: 'forbidden' }, 403);
+
+      if (p === '/event') {
+        return readBody(req, 64 * 1024, (body) => {
+          try { onHookEvent(JSON.parse(body || '{}'), Date.now()); } catch { /* ignore malformed */ }
+          return json(res, { ok: true, state: pet.state });
+        });
       }
-      stateSince = Date.now();
-      return json(res, { ok: true, forced });
-    }
-    if (req.method === 'POST' && p === '/api/exit') {
-      beginShutdown();
-      return json(res, { ok: true });
+      if (p === '/api/open') { psRun('open'); return json(res, { ok: true }); }
+      if (p === '/api/focus') { psRun('focus', termPid); return json(res, { ok: true }); }
+      if (p === '/api/terminal') {
+        const a = q.get('act');
+        const act = (a === 'restore' || a === 'toggle') ? a : 'min';
+        psRun(act, termPid);
+        return json(res, { ok: true });
+      }
+      if (p === '/api/config') {
+        return readBody(req, 1024, (body) => {
+          try {
+            const c = JSON.parse(body || '{}');
+            if (typeof c.theme === 'string') config.theme = c.theme;
+            if (typeof c.fs === 'number') config.fs = Math.min(1.35, Math.max(0.85, c.fs));
+            saveConfig();
+            return json(res, { ok: true, config });
+          } catch { return json(res, { ok: false }); }
+        });
+      }
+      if (p === '/api/debug') {
+        if (q.has('cycle')) {
+          const list = ['auto'].concat(st.STATES);
+          const idx = list.indexOf(forced || 'auto');
+          forced = list[(idx + 1) % list.length];
+          if (forced === 'auto') forced = null;
+        } else if (q.has('state')) {
+          const s = q.get('state');
+          forced = (s === 'auto' || !s) ? null : s;
+        } else {
+          forced = forced ? null : 'thinking';
+        }
+        pet = st.reduce(pet, Object.assign({}, lastFacts, { now: Date.now(), forced }), CFG);
+        broadcast(true);
+        return json(res, { ok: true, forced });
+      }
+      if (p === '/api/exit') { beginShutdown(); return json(res, { ok: true }); }
+      return json(res, { ok: false, error: 'not found' }, 404);
     }
 
     if (req.method === 'GET' && p.startsWith('/gifs/')) {
@@ -490,7 +484,7 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`[pet] listening on http://${HOST}:${PORT}`);
-  updateProcesses().then(() => {
+  updateProcesses(Date.now()).then(() => {
     // stale term pid at startup -> shut down
     if (termPid && termAlive === false) beginShutdown();
   }).catch(() => {});

@@ -57,14 +57,20 @@ const claudeOk = !!claudeV;
 add('REQ', claudeOk, 'Claude Code CLI  （当前: ' + (claudeV || '未检测到') + (rtClaude ? '  ' + rtClaude : '') + '）',
   'npm i -g @anthropic-ai/claude-code   或   https://claude.com/download');
 
-// 3. edge
+// 3. edge / WebView2 runtime
 const edgeCands = [
   (process.env['ProgramFiles(x86)'] || '') + '\\Microsoft\\Edge\\Application\\msedge.exe',
   (process.env.ProgramFiles || '') + '\\Microsoft\\Edge\\Application\\msedge.exe',
 ];
 const edgeOk = edgeCands.some((p) => p && fs.existsSync(p));
-add('WARN', edgeOk, 'Microsoft Edge（桌宠窗口需要）',
+add('WARN', edgeOk, 'Microsoft Edge / WebView2 运行时（桌宠窗口需要）',
   '仅影响窗口显示，服务端仍可运行');
+
+// 4. curl (ships with Windows 10 1803+) - carries the Claude Code hook events
+const curlV = sh('curl.exe --version');
+const curlOk = /^curl/i.test(curlV);
+add('WARN', curlOk, 'curl.exe（hooks 转发需要，可精确感知 claude 阶段）',
+  '缺失时桌宠回退到转录推断，功能仍在；系统自带 curl 一般位于 C:\\Windows\\System32');
 
 // 4. transcripts dir
 const proj = path.join(os.homedir(), '.claude', 'projects');

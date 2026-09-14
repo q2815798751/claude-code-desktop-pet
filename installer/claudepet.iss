@@ -12,7 +12,7 @@
 [Setup]
 AppId={{A6B27F1C-3E2D-4D9B-9A0E-5F1C2B7E8D4A}
 AppName=ClaudePet
-AppVersion=1.1.0
+AppVersion=2.0.0
 AppVerName=ClaudePet 1.1.0
 AppPublisher=sechenwag
 AppPublisherURL=https://github.com/q2815798751/claude-code-desktop-pet
@@ -67,7 +67,13 @@ Name: "{userdesktop}\Claude Pet"; Filename: "{app}\start-both.bat"; WorkingDir: 
 Name: "{userprograms}\Claude Pet"; Filename: "{app}\start-both.bat"; WorkingDir: "{app}"; IconFilename: "{app}\app\pet.ico"
 
 [Run]
+; wire the Claude Code hooks before the pet is first launched
+Filename: "{app}\hooks-setup.bat"; Parameters: "install"; Flags: runhidden waituntilterminated
 Filename: "{app}\start-both.bat"; Description: "{cm:LaunchProgram,ClaudePet}"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+; take them back out - only the entries carrying the notify.cmd marker
+Filename: "{app}\hooks-setup.bat"; Parameters: "remove"; Flags: runhidden waituntilterminated
 
 [Code]
 var

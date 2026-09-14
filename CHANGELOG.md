@@ -2,6 +2,41 @@
 
 本文件记录 ClaudePet 的每次功能与修复改动。
 
+## v2.0.0 (2026-09-14) — 从"猜"改成"被通知"
+
+**架构**
+- **feat hooks 信号源**：新增 `app/notify.cmd`（把 hook 事件的 stdin JSON 原样 POST 给服务，**永远 exit 0**，绝不阻塞工具调用）
+  与 `app/hooks.js`（幂等挂载/摘除 `~/.claude/settings.json` 里的 8 个事件，带 `.claudepet.bak` 备份，只增删带 `notify.cmd` 标记的条目）。
+  install/uninstall 脚本已接入。**精确知道在跑哪个工具、回合何时结束、claude 何时在等你**——不再靠时间阈值猜。
+- **feat SSE**：`GET /events` 推送状态变化，取代客户端 500ms 轮询（轮询保留为回退路径）。`windowActive()` 把 SSE 连接也算作窗口存活。
+- **feat 新增 `awaiting` 状态**：`Notification` 事件触发，琥珀色 + 提示音——"claude 卡在你这"是最该被提醒的时刻。
+- **feat 状态带工具名**：`working` 携带 `tool`，面板/悬浮球直接显示 `BASH` / `编辑文件`，而不是一律 "WORKING"。
+- **refactor 状态机抽成纯函数** `app/state.js`：无 IO、无全局，`reduce(prev, facts) -> next`，可直接单测。
+- **refactor 转录读取抽成** `app/transcript.js`：一次目录扫描 + 一次尾部读，按 `(path,size,mtime)` 缓存解析结果。
+  此前每个 tick 会扫 4 遍目录（`scanLatestMtime` / `readLastMessage` / `scanRecentError` / `readLastAction`），
+  且每次 `/api/state` 请求还会再扫一遍。
+- **perf 进程探活**：每 2s → 每 8s，且**最近 10s 内有任何活动时完全跳过**（有活动即证明 claude 活着）。探活不再是常驻开销。
+- **feat 会话锚点**：`SessionStart`/`SessionEnd` 直接告知会话生灭；PID 只保留"终端死亡则自退"这一条既有语义。
+
+**修复**
+- **fix 提示音刷屏**：`error` 状态持续期间每 500ms 触发一次 toast + 提示音。改为只在状态**真正翻转**时提醒（实测 4s 内由 8 次降到 1 次）。
+- **fix 提示音失效**：`beep()` 每次新建 `AudioContext` 且从不释放，浏览器约 6 次后开始抛异常（被 catch 吞掉），表现为"响几声就哑了"。改为全页复用一个。
+- **fix 断连即退**：`poll()` 的 catch 里直接 `window.close()`，服务重启的瞬时错误就会关掉桌宠。改为连续失败 6 次才退。
+- **fix 本地 CSRF**：任意网页都能用一行 `fetch('http://127.0.0.1:9876/api/exit',{method:'POST'})` 关掉桌宠
+  （简单请求不触发预检，CORS 只挡读不挡执行）。所有 `POST` 与 `/events` 现在校验 `Origin`/`Host`。
+- **fix SSR 注入面**：`window.__INIT__` 用字符串替换注入 JSON，而 `lastAction` 来自转录里的工具名（模型输出）。
+  新增 `app/util.js` 的 `safeJson`，转义 `<` 与 U+2028/U+2029。
+- **fix 错误状态滞留**：工具报错后即使 claude 已经继续工作，仍会红 30s。现在 claude 一旦产出更新的消息就立即解除。
+- **fix `awaiting` 吃掉回合**：等你在权限提示上做选择时，那个回合仍应算"进行中"，否则紧随其后的 `Stop` 不会闪 `done`。
+- **fix `/api/debug` 打回 offline**：强制状态时用残缺的 facts 调 reducer，缺失的 `claudeAlive` 会被读成"离线"，导致循环调试时状态乱跳。
+- **fix 配置双源**：主题/字号曾同时写 `localStorage` 与 `app/config.json`，手改 config.json 后两边会打架。现在服务端是唯一真相。
+
+**文档 / 工程**
+- 新增 `node --test` 用例 39 条（状态机 18 / 转录解析 17 / 转义 4），`node --test app/*.test.js`。
+- 支持 `CLAUDEPET_PORT` 环境变量，方便与正在运行的桌宠共存调试。
+- 重写 `README.md` 与 `docs/DESIGN.md`（此前两者仍描述 `msedge --app` 伪透明窗与 mtime 推断，与代码脱节已久），更新 `docs/CONFIG.md`、`docs/INSTALL.md`。
+
+
 ## v1.1.1 (2026-08-07)
 - **feat 主题**：新增 2 套主题（`sunset` 落日橙、`ocean` 深海蓝），共 6 套循环切换。
 - **feat 样式**：面板与气泡菜单文字加粗（font-weight:600）、文字色更深，任意主题下更醒目。

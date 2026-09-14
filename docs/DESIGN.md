@@ -2,56 +2,107 @@
 
 ## 总览
 ```
-┌─────────────────────────────┐        ┌──────────────────────────────┐
-│ msedge --app (伪透明窗)     │ 500ms  │ node app/server.js           │
-│  app/pet.html (HUD+GIF)     │◄──────►│ HTTP @127.0.0.1:9876         │
-│  500ms 轮询 /api/state       │ 轮询   │ · 状态机（转录 mtime 推断）  │
-│  双击→/api/focus 等交互      │        │ · tasklist/Get-CimInstance  │
-└─────────────────────────────┘        │ · PowerShell 窗口操作        │
-                                       └──────┬───────────────────────┘
-                                              │ 读取
-                                    ┌─────────▼─────────┐
-                                    │ ~/.claude/projects │  ← claude 会话转录
-                                    │ *.jsonl  mtime     │
-                                    └───────────────────┘
+┌────────────────────────────┐  SSE /events   ┌────────────────────────────────┐
+│ ClaudePet.Host.exe         │◄──────────────►│ node app/server.js             │
+│  WebView2 · DWM 真透明     │  状态变化即推送 │  HTTP @127.0.0.1:9876          │
+│  app/pet.html (HUD+GIF)    │                │                                │
+│  双击→/api/focus 等交互     │  POST /event   │  · state.js    纯状态机        │
+└────────────────────────────┘◄───────────────│  · transcript.js 转录快照      │
+        ▲                        hooks 转发    │  · util.js     SSR 安全注入    │
+        │                                      │  · PowerShell 窗口操作          │
+        │                                      └────┬──────────────┬────────────┘
+        │                                           │ 回退读取      │ 兜底探活
+        │                                 ┌─────────▼────────┐  ┌──▼──────────────┐
+        │                                 │ ~/.claude/       │  │ Get-CimInstance │
+        │      ┌──────────────────────────┤ projects/**.jsonl│  │ claude/node 进程│
+        └──────┤ Claude Code hooks        └──────────────────┘  └─────────────────┘
+               │ (app/notify.cmd → POST /event)
+               └── 由 install.bat 幂等写入 ~/.claude/settings.json
 ```
-- **透明窗**：`msedge --app=http://127.0.0.1:9876/` 伪透明（快）；真透明需 C# WPF+WebView2（慢，未采用）。
-- **SSR 注入**：`GET /` 把 `stateJson()` 写入 HTML 的 `window.__INIT__`，首屏即显示正确状态。
-- **短轮询**：客户端 `setInterval(poll, 500)`，服务端同样 500ms 计算一次状态并缓存到内存。
 
-## 状态推断
-- `scanLatestMtime()`：扫描 `~/.claude/projects/**/*.jsonl`，取**最新 mtime** 作为“最后活动时间”。
-- `claudeAliveCheck()`：识别 `claude.exe`（原生 / WinGet）**或** `node.exe` 运行 Claude Code CLI
-  （npm 安装，命令行含 `claude-code` / `@anthropic-ai` / `cli.js`），并**排除自身**（命令行含 `server.js`，
-  避免安装目录 `ClaudePet` 含 "claude" 导致的自我误判）。
-- 终端存活：记录 `start-both.bat` 拉起的终端 PID 到 `app/term.pid`，服务每 2s 查一次；
-  PID 死亡 → 服务进入关闭流程（客户端收到 `shutdown:true` 后 `window.close()`，服务端兜底强杀 Edge）。
+## 三个信号源，按可信度排序
 
-## 状态机（活动 burst 模型）
+| 优先级 | 来源 | 精确度 | 成本 |
+|---|---|---|---|
+| 1 | **Claude Code hooks** → `POST /event` | 精确：知道是哪个工具、回合何时结束、何时在等你 | 事件发生时一次 curl（约 27ms），空闲时零开销 |
+| 2 | **转录快照** `~/.claude/projects/**/*.jsonl` | 中等：只能按内容分类推断"回合中/回合结束" | 每次 tick 一次目录扫描 + 一次尾部读（带缓存） |
+| 3 | **进程探活** `Get-CimInstance Win32_Process` | 粗糙：只能回答"claude 还在不在" | 8s 一次，且有活动时完全跳过 |
+
+hooks 没装时架构自动退回第 2、3 层，功能不减，只是精度下降（面板左下角 `CLI ON*` 的星号表示 hooks 已接入）。
+
+- **SSE 推送**：`GET /events` 是 `text/event-stream`，状态真正变化时才推一帧（15s 心跳保活）。页面用 `EventSource` 接收。旧的 500ms 轮询保留为回退路径（`EventSource` 不可用或连续出错时启用）。
+- **SSR 注入**：`GET /` 把 `safeJson(stateJson())` 写进 HTML 的 `window.__INIT__`，首屏即正确状态，无闪烁。
+
+## 状态机（`app/state.js`，纯函数）
+
+`reduce(prev, facts, cfg) -> next`。没有任何 IO、定时器或模块级全局：输入是事实，输出是新的机器对象。**这是它能被测的原因**（`app/state.test.js`）。
+
+状态集：
+
+| 状态 | 含义 | GIF |
+|---|---|---|
+| `offline` | 没有 claude 在跑 | offlineandidle |
+| `idle` | claude 在，等你说下一句 | offlineandidle |
+| `thinking` | 模型在生成（没有工具在跑） | thinking |
+| `working` | 有工具在执行；`tool` 字段带工具名 | working（回合 >30s 时用 workinglong） |
+| `awaiting` | claude 卡在你这（权限确认 / 空闲提醒） | offlineandidle（琥珀色） |
+| `done` | 一个回合刚结束，闪 5s | done |
+| `error` | 工具失败（在错误窗口内，且 claude 还活着） | errorandwaityou |
+
+优先级（自上而下短路）：`shuttingDown` → `forced`（调试）→ `error` → `!claudeAlive` → 活动分类。
+
+关键规则：
+- **`done` 只在真的工作过之后才闪**（`wasWorking`），避免空闲时凭空闪一下。
+- **`awaiting` 不再清掉 `wasWorking`/`turnStart`**：你在回答一个提示时，那个回合仍然在飞；否则紧随其后的 `Stop` 就不会闪 `done`。
+- **`awaiting` 有 30s 的保持期**，期间转录推断出的 `working` 压不过它（转录慢半拍，会把"等你"瞬间冲掉）；任何 hook 事件立即解除。
+- **错误不只看 30s 窗口**：claude 一旦产出更新的消息就说明它已恢复，桌面宠物立刻闭嘴，不必等窗口走完。
+
+## 存活判定（`computeAlive`）
+
 ```
-claude 未运行 ─────────────► offline
-claude 运行且最近 25s 内有写入：
-  连续活动 <5s  → thinking
-  5–30s         → working
-  >30s          → working_long
-无写入 >25s（活动结束）：
-  先 done 5s ──► idle
-最近 30s 转录含 "isError":true → error（覆盖上面）
+有 hook 会话：
+  最近 90s 内有事件        → 活着
+  探活结果未知(null)       → 乐观认为活着
+  会话安静 + 探活说没了     → 离线
+没有 hook 会话：
+  只看探活结果
 ```
-“done” 在每次活动 burst 结束时闪 5s，模拟“刚完成任务”。
+
+没有 hooks 时行为与旧版一致；有 hooks 时多了一层"安静 90s 才降级到探活"的缓冲。
+
+**探活的省法**：`shouldProbe()` 在最近 10s 内有任何活动（hook 事件或转录写入）时直接跳过探活——有活动就证明 claude 活着，探活纯属浪费，而这正是最常见的情况。空闲时才每 8s 探一次。
+
+## 生命周期
+
+- **状态锚在会话**：hook 的 `SessionStart`/`SessionEnd` 直接告知会话生灭，不再只能靠 PID 猜。
+- **退出锚在终端 PID**：`start-both.bat` 拉起的终端 PID 记在 `app/term.pid`，死了就进入关闭流程（客户端收到 `shutdown:true` 后 `window.close()`，服务端 800ms 后强杀宿主兜底）。手动起的 claude 不受这条约束——它们是状态来源，不是生死判据。
+- **窗口存活**：`/api/window` 在"有 SSE 连接"或"5s 内被访问过"时返回 `1`，供 `start-both.bat` 幂等判断要不要开窗。
 
 ## 文件职责
+
 | 文件 | 职责 |
 |---|---|
-| `app/server.js` | HTTP 服务、状态机、进程/转录监控、PowerShell 调用、GIF/HTML 托管 |
-| `app/pet.html` | HUD UI：霓虹样式、500ms 轮询、交互按钮、键盘快捷键 |
-| `app/pet.ps1` | 开 Edge 窗（右下角）、焦点/最小化/还原终端（ShowWindow P/Invoke） |
+| `app/state.js` | 纯状态机（`reduce` / `computeAlive` / `STATES`）— 无 IO，可直接单测 |
+| `app/transcript.js` | 转录快照：一次目录扫描 + 一次尾部读，按 (path,size,mtime) 缓存解析结果 |
+| `app/util.js` | `safeJson`：SSR 注入用的转义（`<` / U+2028 / U+2029） |
+| `app/server.js` | HTTP 服务、SSE、hook 事件入口、进程探活、PowerShell 调用、配置读写 |
+| `app/pet.html` | HUD UI：霓虹样式、SSE 订阅、交互按钮、键盘快捷键 |
+| `app/notify.cmd` | hook 转发器：把 stdin 上的事件 JSON 原样 POST 给服务，**永远 exit 0** |
+| `app/hooks.js` | 幂等写入/移除 `~/.claude/settings.json` 里的 hooks（带 `.claudepet.bak` 备份） |
+| `app/pet.ps1` | 开宿主窗、焦点/最小化/还原终端（ShowWindow P/Invoke） |
 | `app/pet-term.ps1` | 终端宿主：在 `$env:USERPROFILE` 启动 claude（保证包可移动） |
-| `check-env.bat/.js` | 环境自检（node / claude / edge / 转录目录） |
+| `app/*.test.js` | `node --test` 用例：状态机、转录解析、转义 |
+| `check-env.bat/.js` | 环境自检（node / claude / WebView2 / curl / 转录目录） |
 | `start-both.bat` | 幂等启动：环境自检 → 终端+claude → 服务 → 桌宠窗 |
-| `install.bat` | 安装到 `%LOCALAPPDATA%\ClaudePet` + 快捷方式 |
+| `install.bat` / `uninstall.bat` | 安装/卸载（含 hooks 的挂载与摘除） |
 
 ## 安全与边界
-- 服务只监听 `127.0.0.1`，API 无敏感操作（焦点/窗口/退出）。
-- 只读扫描转录文件，不修改用户数据；运行期文件（`term.pid`、`edge_profile/`）都在安装目录内。
-- 零外部依赖：全部使用 Node 内置模块 + Windows 自带 PowerShell / Edge / curl / Compress-Archive。
+
+- 服务只监听 `127.0.0.1`，不对外暴露。
+- **同源校验**：所有 `POST` 与 `/events` 都检查 `Origin` / `Host`，只接受 `127.0.0.1:9876` 或 `localhost:9876`，或完全没有 `Origin` 的本地调用（curl / hooks）。
+  没有这道校验时，任意网页都能用一行 `fetch('http://127.0.0.1:9876/api/exit', {method:'POST'})` 关掉桌宠——简单请求不触发预检，CORS 只挡读、不挡执行。
+- **SSR 注入转义**：`safeJson` 把 `<`（以及 U+2028/U+2029 两个行分隔符）转义掉，注入的 JSON 因此不可能提前闭合它所在的 `<script>` 标签。
+  `lastAction` 的值来自转录里的工具名（模型输出），不转义就等于把用户数据注入进页面。
+- 只读扫描转录文件，不修改用户数据；运行期文件（`term.pid`、`config.json`、`host.json`、`webview2data/`）都在安装目录内。
+- 改 `~/.claude/settings.json` 仅限 hooks 一项，且只增删带 `notify.cmd` 标记的条目，首次安装前自动备份。
+- 零外部依赖：Node 内置模块 + 系统自带 PowerShell / curl / WebView2 运行时。

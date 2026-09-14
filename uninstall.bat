@@ -13,11 +13,18 @@ echo   ClaudePet - Uninstaller
 echo ==========================================
 echo.
 
-echo  [1/2] Stopping pet server (if running)...
+echo  [1/3] Stopping pet server (if running)...
 curl -s -X POST http://127.0.0.1:9876/api/exit >nul 2>&1
 %SystemRoot%\System32\timeout.exe /t 2 /nobreak >nul
 
-echo  [2/2] Removing shortcuts and files...
+echo  [2/3] Removing Claude Code hooks...
+if exist "%TARGET%\hooks-setup.bat" (
+  call "%TARGET%\hooks-setup.bat" remove
+) else (
+  echo        hooks-setup.bat not found - nothing to remove.
+)
+
+echo  [3/3] Removing shortcuts and files...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; foreach ($folder in @($ws.SpecialFolders.Item('Desktop'), (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'))) { $f = Join-Path $folder 'Claude Pet.lnk'; if (Test-Path $f) { Remove-Item $f -Force } }"
 
 > "%TEMP%\pet-uninstall-cleanup.bat" echo @echo off
