@@ -12,8 +12,8 @@
 [Setup]
 AppId={{A6B27F1C-3E2D-4D9B-9A0E-5F1C2B7E8D4A}
 AppName=ClaudePet
-AppVersion=2.0.0
-AppVerName=ClaudePet 1.1.0
+AppVersion=2.1.1
+AppVerName=ClaudePet 2.1.1
 AppPublisher=sechenwag
 AppPublisherURL=https://github.com/q2815798751/claude-code-desktop-pet
 AppSupportURL=https://github.com/q2815798751/claude-code-desktop-pet
@@ -39,7 +39,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 ; --- app (exclude runtime user state) ---
-Source: "{#Root}\app\*"; DestDir: "{app}\app"; Flags: recursesubdirs ignoreversion; Excludes: "config.json,host.json,runtime.ini,term.pid,*.log,*.pid"
+Source: "{#Root}\app\*"; DestDir: "{app}\app"; Flags: recursesubdirs ignoreversion; Excludes: "config.json,host.json,runtime.ini,term.pid,usage.json,usage.json.tmp,*.log,*.pid"
 ; --- host: prebuilt window exe + WebView2 DLLs + source + build script ---
 Source: "{#Root}\host\ClaudePet.Host.exe"; DestDir: "{app}\host"; Flags: ignoreversion
 Source: "{#Root}\host\ClaudePetHost.cs"; DestDir: "{app}\host"; Flags: ignoreversion

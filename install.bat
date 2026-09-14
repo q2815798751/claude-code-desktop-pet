@@ -7,7 +7,7 @@ rem  Env check runs first but does NOT block installation.
 rem ============================================================
 setlocal
 set "TARGET=%LOCALAPPDATA%\ClaudePet"
-set "VER=2.0.0"
+set "VER=2.1.1"
 
 echo ==========================================
 echo   ClaudePet v%VER% - Installer
@@ -34,6 +34,10 @@ if errorlevel 1 (
   exit /b 1
 )
 xcopy "%~dp0host" "%TARGET%\host\" /e /i /y /q >nul
+rem Never ship the installing machine's runtime state. These are gitignored, so a
+rem clean clone has none - but running install.bat from a working copy would
+rem otherwise carry over someone's theme, window position and token ledger.
+del /q "%TARGET%\app\config.json" "%TARGET%\app\host.json" "%TARGET%\app\runtime.ini" "%TARGET%\app\term.pid" "%TARGET%\app\usage.json" "%TARGET%\app\usage.json.tmp" 2>nul
 for %%F in (check-env.bat check-env.js start-both.bat start-pet.bat stop-pet.bat uninstall.bat hooks-setup.bat) do (
   copy /y "%~dp0%%F" "%TARGET%\" >nul
 )
