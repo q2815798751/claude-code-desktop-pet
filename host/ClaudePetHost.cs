@@ -37,6 +37,9 @@ public class MainForm : Form
     private readonly Timer _saveTimer = new Timer();
     private bool _dirty;
 
+    // Where the user actually put the pet — independent of any on-screen clamping.
+    private Point _centre;
+
     public const string TITLE = "CLAUDE.PET";
     private const int DEF_W = 150, DEF_H = 170;
     private const int SAVE_SETTLE_MS = 400;
@@ -60,6 +63,7 @@ public class MainForm : Form
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         ApplyPosition();
+        RememberCentre();
 
         _web = new WebView2 { Dock = DockStyle.Fill };
         _web.DefaultBackgroundColor = Color.Transparent;   // page transparent areas show through (DWM glass)
@@ -93,6 +97,7 @@ public class MainForm : Form
     public void MoveBy(int dx, int dy)
     {
         Location = new Point(Location.X + dx, Location.Y + dy);
+        RememberCentre();
         Touch();
     }
 
@@ -100,18 +105,27 @@ public class MainForm : Form
     // to unfold down-right from wherever the ball sat, so the pet appeared to jump.
     // The result is re-clamped so a pet parked in a corner cannot push the panel
     // off-screen — which would also put the collapsed ball out of reach.
+    //
+    // The clamp is a DISPLAY correction only: it moves Location, never _centre. If it
+    // fed back into the anchor, opening the panel near a screen edge would shift it
+    // inward and collapsing would then drop the ball somewhere the user never put it.
+    // With _centre preserved the ball returns to exactly where it was.
     public void ResizeWindow(int w, int h)
     {
         int nw = Math.Max(120, w), nh = Math.Max(120, h);
-        int cx = Location.X + Size.Width / 2;
-        int cy = Location.Y + Size.Height / 2;
-        Rectangle sa = Screen.FromPoint(new Point(cx, cy)).WorkingArea;
+        Point c = _centre;
+        Rectangle sa = Screen.FromPoint(c).WorkingArea;
 
         Size = new Size(nw, nh);
-        int nx = Math.Max(sa.Left, Math.Min(cx - nw / 2, sa.Right - nw));
-        int ny = Math.Max(sa.Top, Math.Min(cy - nh / 2, sa.Bottom - nh));
+        int nx = Math.Max(sa.Left, Math.Min(c.X - nw / 2, sa.Right - nw));
+        int ny = Math.Max(sa.Top, Math.Min(c.Y - nh / 2, sa.Bottom - nh));
         Location = new Point(nx, ny);
         Touch();
+    }
+
+    private void RememberCentre()
+    {
+        _centre = new Point(Location.X + Size.Width / 2, Location.Y + Size.Height / 2);
     }
 
     private void Touch()
