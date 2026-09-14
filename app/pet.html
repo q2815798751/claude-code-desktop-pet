@@ -94,14 +94,23 @@ html,body{width:100%;height:100%;overflow:hidden;background:transparent;   /* tr
    badge on the ring plus one line in the free strip under it. A critical alert
    opens the panel instead, which is where bubbles live. */
 .ball-badge{position:absolute;top:22px;right:22px;min-width:16px;height:16px;border-radius:9px;
-  display:flex;align-items:center;justify-content:center;padding:0 4px;
+  display:flex;align-items:center;justify-content:center;padding:0 4px;cursor:pointer;
   font-size:calc(9px * var(--fs));font-weight:700;color:#fff;background:var(--crit);
   box-shadow:0 0 10px var(--crit);animation:blink 1.6s steps(1) infinite}
 .ball-badge[hidden]{display:none}
-.ball-alert{position:absolute;bottom:4px;left:0;right:0;text-align:center;pointer-events:none;
-  font-size:calc(9px * var(--fs));font-weight:600;color:var(--crit);
-  text-shadow:0 0 8px var(--crit);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 4px}
+.ball-badge:hover{filter:brightness(1.35)}
+/* The ball window is only 150x170, so one ellipsised line cannot hold an alert.
+   The block wraps instead: title on its own line, detail underneath, three lines
+   maximum. The font runs smaller than the rest of the ball HUD so two lines of
+   detail still clear the rim, and a --bg1 halo keeps it legible over the GIF. */
+.ball-alert{position:absolute;bottom:3px;left:0;right:0;padding:0 5px;text-align:center;
+  pointer-events:none;font-size:calc(7.5px * var(--fs));line-height:1.15;font-weight:600;
+  color:var(--crit);overflow-wrap:anywhere;overflow:hidden;
+  max-height:calc(3 * 1.15 * 7.5px * var(--fs));
+  text-shadow:0 0 3px var(--bg1),0 0 6px var(--bg1),0 0 10px var(--crit)}
 .ball-alert[hidden]{display:none}
+.ball-alert b{display:block;letter-spacing:1px}
+.ball-alert span{display:block;font-weight:400;opacity:.9}
 
 /* bubble menu */
 #bubbles{position:fixed;inset:0;pointer-events:none;z-index:50}
@@ -638,21 +647,65 @@ function syncAlertsToggle(){
 // ships the current list in every frame. The page only decides presentation: a badge
 // while collapsed, bubbles while open. A bubble pops once per firing — keyed on
 // firedAt, so a reconnect or a reload never replays an old alert.
-const seenAlerts = new Map();
+//
+// "Unread" is the page's own notion on top of the server's "active". A condition can
+// stay true for an hour (context above a line, a heavy day), and a badge that stays
+// lit that whole time stops meaning anything. Clicking the badge — or dismissing a
+// bubble by hand — marks that firing as seen, and the dot goes quiet until the rule
+// fires again with a new firedAt.
+const seenAlerts = new Map();     // id -> firedAt already popped as a bubble
+const ackAlerts = new Map();      // id -> firedAt the user has acknowledged
 let firstFrame = true;
+
+const activeAlerts = () => ((lastState && lastState.alerts) || []).filter((a) => a.active);
+const isAcked = (a) => ackAlerts.get(a.id) === a.firedAt;
+const unreadAlerts = () => activeAlerts().filter((a) => !isAcked(a));
+
+function renderAlertIndicators(){
+  const unread = unreadAlerts();
+  const n = unread.length;
+  alertBadge.hidden = n === 0;
+  alertBadge.textContent = n;
+  alertBadge.title = n ? n + ' 条未读告警，点击查看' : '';
+  ballBadge.hidden = n === 0;
+  ballBadge.textContent = n;
+  ballBadge.title = alertBadge.title;
+
+  // The ball strip follows the unread set too: acknowledging is the user saying
+  // "seen it", so it goes quiet even though the condition is still standing.
+  ballAlert.textContent = '';
+  ballAlert.hidden = n === 0;
+  if (!n) return;
+  const b = document.createElement('b');
+  b.textContent = unread[0].title;
+  const s = document.createElement('span');
+  s.textContent = unread[0].detail;
+  ballAlert.appendChild(b);
+  ballAlert.appendChild(s);
+}
+
+function ackAlert(a){
+  if (!a || !a.firedAt) return;
+  ackAlerts.set(a.id, a.firedAt);
+  renderAlertIndicators();
+}
+function ackAllActive(){
+  activeAlerts().forEach((a) => { if (a.firedAt) ackAlerts.set(a.id, a.firedAt); });
+  renderAlertIndicators();
+}
+// Mark everything read, then show it. The order matters: acking first means the
+// bubbles are the record of what was just cleared.
+function openAlerts(){
+  const active = activeAlerts();
+  ackAllActive();
+  if (!active.length) return;
+  if (mode === 'ball') setMode('panel');
+  active.slice().reverse().forEach((a, i) => setTimeout(() => pushAlertBubble(a), i * 90));
+}
 
 function renderAlerts(list){
   const all = list || [];
-  const active = all.filter((a) => a.active);
-
-  alertBadge.hidden = active.length === 0;
-  alertBadge.textContent = active.length;
-  ballBadge.hidden = active.length === 0;
-  ballBadge.textContent = active.length;
-  ballAlert.hidden = active.length === 0;
-  ballAlert.textContent = active.length ? (active[0].title + ' · ' + active[0].detail) : '';
-
-  if (!all.length){ alertStack.innerHTML = ''; return; }
+  if (!all.length){ alertStack.innerHTML = ''; renderAlertIndicators(); return; }
 
   for (const a of all){
     if (!a.firedAt) continue;
@@ -664,6 +717,7 @@ function renderAlerts(list){
     if (mode === 'ball' && a.level === 'crit' && !ballDrag.dragging()) setMode('panel');
     pushAlertBubble(a);
   }
+  renderAlertIndicators();
 }
 // Sit the stack just above the "现在" line rather than at a fixed offset: the footer
 // and that line both grow with --fs.
@@ -687,15 +741,19 @@ function pushAlertBubble(a){
   el.querySelector('.al-detail').textContent = a.detail;
 
   let closed = false;
-  const close = () => {
+  // `seen` is the difference between "the user dismissed this" and "the eight
+  // seconds ran out". Only the former clears the dot; a bubble timing out over an
+  // empty desk means nobody read it.
+  const close = (seen) => {
     if (closed) return;
     closed = true;
+    if (seen) ackAlert(a);
     el.classList.add('out');
     setTimeout(() => el.remove(), 200);
   };
-  el.querySelector('.al-x').addEventListener('click', (e) => { e.stopPropagation(); close(); });
-  el.addEventListener('click', close);
-  setTimeout(close, ALERT_TTL);
+  el.querySelector('.al-x').addEventListener('click', (e) => { e.stopPropagation(); close(true); });
+  el.addEventListener('click', () => close(true));
+  setTimeout(() => close(false), ALERT_TTL);
 
   alertStack.appendChild(el);
   while (alertStack.children.length > ALERT_MAX) alertStack.removeChild(alertStack.firstChild);
@@ -781,7 +839,13 @@ function showBubbles(cx, cy){
   });
   bubblesEl.classList.add('show');
 }
-function hideBubbles(){ bubblesEl.classList.remove('show'); bubblesEl.innerHTML = ''; }
+// Guarded: this runs on every click anywhere in the page, and it used to rebuild
+// the menu's DOM each time even when the menu was not open.
+function hideBubbles(){
+  if (!bubblesEl.classList.contains('show')) return;
+  bubblesEl.classList.remove('show');
+  bubblesEl.innerHTML = '';
+}
 function bubbleAction(act){
   switch (act) {
     case 'theme': cycleTheme(); break;
@@ -795,10 +859,14 @@ function bubbleAction(act){
 }
 
 // ---- ball + panel drag ----
-const ballDrag = makeDraggable(ball);
-const isButton = (t) => !!(t && t.closest && t.closest('button'));
-makeDraggable(document.querySelector('.header'), { skip: isButton });
-makeDraggable(document.querySelector('.statebox'), { skip: isButton });
+// Anything with its own click handler opts out of the drag, so a click that wobbles
+// a few pixels still lands as a click instead of silently moving the window. The
+// alert badge counts: it is a small target and moving the pet instead of opening
+// its alerts is the worst possible outcome of a 3px slip.
+const isInteractive = (t) => !!(t && t.closest && t.closest('button,.alertbadge,.ball-badge'));
+const ballDrag = makeDraggable(ball, { skip: isInteractive });
+makeDraggable(document.querySelector('.header'), { skip: isInteractive });
+makeDraggable(document.querySelector('.statebox'), { skip: isInteractive });
 // .header and .statebox get cursor:move from the stylesheet, not from here.
 
 ball.addEventListener('click', () => { if (!ballDrag.moved()) setMode('panel'); });
@@ -829,14 +897,12 @@ document.getElementById('bCollapse').onclick = () => setMode('ball');
 bUsage.onclick = () => setUsagePage(!usageOpen);
 usageBar.onclick = () => setUsagePage(!usageOpen);
 // A bubble only pops the moment an alert fires. Opening the panel later shows the
-// badge but no detail, so the badge replays whatever is still active on demand.
-alertBadge.addEventListener('click', (e) => {
-  e.stopPropagation();
-  const active = ((lastState && lastState.alerts) || []).filter((a) => a.active);
-  if (!active.length) return;
-  if (mode === 'ball') setMode('panel');
-  active.slice().reverse().forEach((a, i) => setTimeout(() => pushAlertBubble(a), i * 90));
-});
+// badge but no detail, so the badge replays whatever is still active — and clears
+// itself in the same click, which is what "点击查看后消除" means.
+alertBadge.addEventListener('click', (e) => { e.stopPropagation(); openAlerts(); });
+// Same contract on the collapsed ball; here the click also has to open the panel,
+// since a 150px window has nowhere to draw a bubble.
+ballBadge.addEventListener('click', (e) => { e.stopPropagation(); openAlerts(); });
 document.getElementById('uvFsPlus').onclick = () => { applyFs(fs + 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); };
 document.getElementById('uvFsMinus').onclick = () => { applyFs(fs - 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); };
 uvAlerts.onclick = () => {
@@ -851,8 +917,11 @@ document.querySelectorAll('.uv-tab').forEach((t) => t.addEventListener('click', 
   document.querySelectorAll('.uv-tab').forEach((x) => x.classList.toggle('on', x === t));
   if (lastState) renderUsageView(lastState.usage);
 }));
-petImg.addEventListener('dblclick', () => api('/api/focus'));
-usageViewEl.addEventListener('dblclick', () => api('/api/focus'));
+// Double-click = focus the terminal, but only on dead space. Without the guard a
+// double-click on a tab, a toggle or the font buttons also yanked the terminal to
+// the foreground — the click did its own job and then did something unrelated.
+petImg.addEventListener('dblclick', (e) => { if (!e.target.closest('button')) api('/api/focus'); });
+usageViewEl.addEventListener('dblclick', (e) => { if (!e.target.closest('button')) api('/api/focus'); });
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 't' || e.key === 'T') cycleTheme();
