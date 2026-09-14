@@ -5,12 +5,17 @@
 <title>CLAUDE.PET</title>
 <style>
 /* ============ themes ============ */
+/* --warn / --crit are the alert accents. Every theme already had these colours in
+   its state palette (awaiting / offline); the alert layer reuses them so a bubble
+   never looks pasted on from another design. */
 :root,
 html[data-theme="cyber"]{
   --bg1:#04060d; --bg2:#0a0f1c; --bg-body:transparent;
   --txt:#b9dcff; --dim:#5f7290;
   --ac:#00f0ff;  --ac-rgb:0,240,255;
   --ac2:#ff00e5; --ac2-rgb:255,0,229;
+  --warn:#ffcc00; --warn-rgb:255,204,0;
+  --crit:#ff2a2a; --crit-rgb:255,42,42;
   --scan:255,255,255;
 }
 html[data-theme="paper"]{
@@ -18,6 +23,8 @@ html[data-theme="paper"]{
   --txt:#11110f; --dim:#8d8d86;
   --ac:#4a4a48;  --ac-rgb:74,74,72;
   --ac2:#b8894a; --ac2-rgb:184,137,74;
+  --warn:#c77800; --warn-rgb:199,120,0;
+  --crit:#c0392b; --crit-rgb:192,57,43;
   --scan:0,0,0;
 }
 html[data-theme="matrix"]{
@@ -25,6 +32,8 @@ html[data-theme="matrix"]{
   --txt:#a0efac; --dim:#3f8f4f;
   --ac:#00ff41;  --ac-rgb:0,255,65;
   --ac2:#00c42e; --ac2-rgb:0,196,46;
+  --warn:#ffee00; --warn-rgb:255,238,0;
+  --crit:#ff2a2a; --crit-rgb:255,42,42;
   --scan:0,255,65;
 }
 html[data-theme="gold"]{
@@ -32,6 +41,8 @@ html[data-theme="gold"]{
   --txt:#eadbb2; --dim:#7d7056;
   --ac:#ffd166;  --ac-rgb:255,209,102;
   --ac2:#b58a2f; --ac2-rgb:181,138,47;
+  --warn:#ff9f1c; --warn-rgb:255,159,28;
+  --crit:#ff5a5a; --crit-rgb:255,90,90;
   --scan:255,209,102;
 }
 html[data-theme="sunset"]{            /* 落日橙 */
@@ -39,6 +50,8 @@ html[data-theme="sunset"]{            /* 落日橙 */
   --txt:#ffe7d2; --dim:#9a7a86;
   --ac:#ff6b35;  --ac-rgb:255,107,53;
   --ac2:#ff2e88; --ac2-rgb:255,46,136;
+  --warn:#ffd166; --warn-rgb:255,209,102;
+  --crit:#ff4d4d; --crit-rgb:255,77,77;
   --scan:255,107,53;
 }
 html[data-theme="ocean"]{             /* 深海蓝 */
@@ -46,6 +59,8 @@ html[data-theme="ocean"]{             /* 深海蓝 */
   --txt:#c4f2ff; --dim:#5a8a9a;
   --ac:#00e5ff;  --ac-rgb:0,229,255;
   --ac2:#00ffb3; --ac2-rgb:0,255,179;
+  --warn:#ffd166; --warn-rgb:255,209,102;
+  --crit:#ff5a5a; --crit-rgb:255,90,90;
   --scan:0,229,255;
 }
 :root{ --fs:1; --st:#00f0ff; }
@@ -75,6 +90,18 @@ html,body{width:100%;height:100%;overflow:hidden;background:transparent;   /* tr
 .ball-status{position:absolute;top:8px;left:0;right:0;text-align:center;pointer-events:none;
   font-size:calc(11px * var(--fs));font-weight:600;letter-spacing:2px;color:var(--st);
   text-shadow:0 0 8px var(--st),0 0 16px var(--st)}
+/* The ball window is only 150x170, so an alert cannot be a bubble here — it is a
+   badge on the ring plus one line in the free strip under it. A critical alert
+   opens the panel instead, which is where bubbles live. */
+.ball-badge{position:absolute;top:22px;right:22px;min-width:16px;height:16px;border-radius:9px;
+  display:flex;align-items:center;justify-content:center;padding:0 4px;
+  font-size:calc(9px * var(--fs));font-weight:700;color:#fff;background:var(--crit);
+  box-shadow:0 0 10px var(--crit);animation:blink 1.6s steps(1) infinite}
+.ball-badge[hidden]{display:none}
+.ball-alert{position:absolute;bottom:4px;left:0;right:0;text-align:center;pointer-events:none;
+  font-size:calc(9px * var(--fs));font-weight:600;color:var(--crit);
+  text-shadow:0 0 8px var(--crit);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 4px}
+.ball-alert[hidden]{display:none}
 
 /* bubble menu */
 #bubbles{position:fixed;inset:0;pointer-events:none;z-index:50}
@@ -85,7 +112,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:transparent;   /* tr
   color:var(--txt);font-size:calc(9px*var(--fs));font-weight:600;letter-spacing:1px;white-space:nowrap;
   transition:transform .16s ease;box-shadow:0 0 8px rgba(var(--ac-rgb),.25)}
 .bubble:hover{background:rgba(var(--ac-rgb),.28)}
-.bubble.bad{border-color:#ff3b3b;color:#ff6b6b}
+.bubble.bad{border-color:var(--crit);color:var(--crit)}
 
 /* ============ PANEL VIEW ============ */
 body.mode-ball #panel{display:none}
@@ -107,18 +134,28 @@ body.mode-panel #ball{display:none}
 .corner.bl{bottom:3px;left:3px;border-right:none;border-top:none}
 .corner.br{bottom:3px;right:3px;border-left:none;border-top:none}
 
-.header{display:flex;align-items:center;gap:6px;flex:none;min-height:16px}
+/* The header and the state box are the panel's drag handle, the way a title bar
+   would be. Everything interactive inside them opts out (see makeDraggable). */
+.header,.statebox{cursor:move}
+.header button,.statebox button{cursor:pointer}
+.header{display:flex;align-items:center;gap:5px;flex:none;min-height:16px}
 .led{width:8px;height:8px;border-radius:50%;background:var(--st);flex:none;
   box-shadow:0 0 8px var(--st);animation:blink 1.2s steps(1) infinite}
 @keyframes blink{50%{opacity:.25}}
-.title{font-size:calc(10px * var(--fs));font-weight:600;letter-spacing:2px;color:var(--dim);white-space:nowrap;overflow:hidden}
+.title{font-size:calc(10px * var(--fs));font-weight:600;letter-spacing:2px;color:var(--dim);
+  flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .title b{color:var(--st)}
-.clock{margin-left:auto;font-size:calc(10px * var(--fs));color:var(--dim)}
+.clock{flex:none;font-size:calc(10px * var(--fs));color:var(--dim)}
 .mini{font-family:inherit;font-size:calc(11px*var(--fs));width:calc(15px*var(--fs));height:calc(15px*var(--fs));
-  line-height:1;color:var(--txt);background:rgba(var(--ac-rgb),.08);border:1px solid rgba(var(--ac-rgb),.3);
+  line-height:1;flex:none;color:var(--txt);background:rgba(var(--ac-rgb),.08);border:1px solid rgba(var(--ac-rgb),.3);
   cursor:pointer;padding:0}
 .mini:hover{background:rgba(var(--ac-rgb),.22)}
-.fsctl{display:flex;gap:2px}
+.mini.on{color:var(--bg1);background:var(--st);border-color:var(--st);box-shadow:0 0 8px var(--st)}
+.alertbadge{flex:none;cursor:pointer;font-size:calc(8px*var(--fs));font-weight:700;color:var(--crit);
+  background:rgba(var(--crit-rgb),.14);border:1px solid var(--crit);padding:0 3px;line-height:1.5;
+  box-shadow:0 0 7px rgba(var(--crit-rgb),.5);animation:blink 1.6s steps(1) infinite}
+.alertbadge[hidden]{display:none}
+.alertbadge:hover{background:rgba(var(--crit-rgb),.3)}
 
 .statebox{flex:none;margin-top:4px}
 .stateline{font-size:calc(16px * var(--fs));font-weight:700;letter-spacing:3px;color:var(--st);
@@ -128,7 +165,23 @@ body.mode-panel #ball{display:none}
 .bar i{position:absolute;inset:0;width:0%;background:linear-gradient(90deg,var(--st),transparent);box-shadow:0 0 8px var(--st);transition:width .4s linear}
 .bar u{position:absolute;right:0;top:-1px;font-size:calc(8px * var(--fs));color:var(--dim)}
 
-.stage{flex:1;min-height:120px;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+/* ---- usage strip: always on, one line ---- */
+.ubar{flex:none;display:flex;align-items:center;gap:8px;margin-top:5px;padding:2px 5px;
+  font-size:calc(9px * var(--fs));font-weight:600;color:var(--dim);cursor:pointer;
+  border:1px solid rgba(var(--ac-rgb),.18);background:rgba(var(--ac-rgb),.04);white-space:nowrap}
+.ubar:hover{background:rgba(var(--ac-rgb),.13)}
+.ubar b{color:var(--st);font-weight:600}
+.ubar .uctx{margin-left:auto;display:flex;align-items:center;gap:4px}
+.ubar .ufill{position:relative;display:block;width:calc(44px * var(--fs));height:6px;
+  background:rgba(var(--scan),.12);border:1px solid rgba(var(--scan),.16)}
+.ubar .ufill i{position:absolute;inset:0;width:0;background:var(--st);box-shadow:0 0 6px var(--st);transition:width .3s}
+.ubar.warn b{color:var(--warn)}
+.ubar.warn .ufill i{background:var(--warn);box-shadow:0 0 6px var(--warn)}
+.ubar.over b{color:var(--crit)}
+.ubar.over .ufill i{background:var(--crit);box-shadow:0 0 6px var(--crit)}
+.ubar.over{border-color:rgba(var(--crit-rgb),.4)}
+
+.stage{flex:1;min-height:110px;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .panel-ring{position:absolute;width:calc(var(--pet-size)*1.08);height:calc(var(--pet-size)*1.08);border-radius:50%;
   border:1px solid rgba(var(--ac-rgb),.16);box-shadow:0 0 30px rgba(var(--ac-rgb),.10);
   animation:spin 14s linear infinite}
@@ -136,6 +189,41 @@ body.mode-panel #ball{display:none}
 #pet{position:relative;width:var(--pet-size);height:var(--pet-size);object-fit:contain;cursor:pointer;
   filter:drop-shadow(0 0 14px rgba(var(--ac-rgb),.22))}
 #pet.dim{opacity:.6}
+body.usage-mode #pet,body.usage-mode .panel-ring{display:none}
+
+/* ---- usage page: replaces the pet in the stage ---- */
+#usageView{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;gap:6px;padding:2px 1px}
+#usageView[hidden]{display:none}
+.uv-tabs{display:flex;gap:3px;flex:none}
+.uv-tab{flex:1;font-family:inherit;font-size:calc(9px*var(--fs));font-weight:600;letter-spacing:1px;
+  color:var(--dim);background:rgba(var(--ac-rgb),.04);border:1px solid rgba(var(--ac-rgb),.2);
+  padding:3px 0;cursor:pointer}
+.uv-tab:hover{background:rgba(var(--ac-rgb),.14)}
+.uv-tab.on{color:var(--bg1);background:var(--st);border-color:var(--st);box-shadow:0 0 8px var(--st)}
+.uv-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;flex:none}
+.uv-cell{display:flex;flex-direction:column;gap:1px;padding:3px 5px;
+  border:1px solid rgba(var(--ac-rgb),.16);background:rgba(var(--ac-rgb),.04)}
+.uv-k{font-size:calc(8px*var(--fs));letter-spacing:1px;color:var(--dim)}
+.uv-v{font-size:calc(13px*var(--fs));font-weight:700;color:var(--st);text-shadow:0 0 8px var(--st)}
+.uv-ctx{display:flex;align-items:center;gap:6px;flex:none;font-size:calc(8px*var(--fs));color:var(--dim)}
+.uv-ctx[hidden]{display:none}
+.uv-bar{flex:1;position:relative;height:7px;background:rgba(var(--scan),.1);border:1px solid rgba(var(--scan),.14)}
+.uv-bar i{position:absolute;inset:0;width:0;background:linear-gradient(90deg,var(--st),transparent);
+  box-shadow:0 0 8px var(--st);transition:width .3s}
+.uv-bar i.warn{background:linear-gradient(90deg,var(--warn),transparent);box-shadow:0 0 8px var(--warn)}
+.uv-bar i.over{background:linear-gradient(90deg,var(--crit),transparent);box-shadow:0 0 8px var(--crit)}
+.uv-spark{display:flex;align-items:flex-end;gap:3px;flex:none;height:calc(26px*var(--fs))}
+.uv-spark i{flex:1;min-height:2px;background:linear-gradient(180deg,var(--st),transparent);
+  box-shadow:0 0 6px rgba(var(--ac-rgb),.35)}
+.uv-spark i.today{background:linear-gradient(180deg,var(--warn),transparent)}
+/* A day with no usage still needs a visible column, or the chart reads as gaps. */
+.uv-spark i.zero{background:rgba(var(--scan),.18);box-shadow:none}
+.uv-foot{display:flex;align-items:center;gap:6px;flex:none;font-size:calc(8px*var(--fs));color:var(--dim)}
+.uv-foot .sp{margin-left:auto}
+.uv-toggle{font-family:inherit;font-size:calc(9px*var(--fs));font-weight:600;color:var(--txt);
+  background:rgba(var(--ac-rgb),.05);border:1px solid rgba(var(--ac-rgb),.28);padding:1px 9px;cursor:pointer}
+.uv-toggle:hover{background:rgba(var(--ac-rgb),.18)}
+.uv-toggle.on{color:var(--bg1);background:var(--st);border-color:var(--st)}
 
 .nowbar{flex:none;display:flex;gap:6px;margin-top:4px;font-size:calc(9px*var(--fs));font-weight:600;color:var(--dim);
   border:1px solid rgba(var(--ac-rgb),.18);background:rgba(var(--ac-rgb),.04);padding:2px 6px;
@@ -150,7 +238,43 @@ body.mode-panel #ball{display:none}
   background:rgba(var(--ac-rgb),.05);border:1px solid rgba(var(--ac-rgb),.28);padding:calc(4px * var(--fs)) 0;
   cursor:pointer;text-align:center;transition:all .15s}
 .btn:hover{background:rgba(var(--ac-rgb),.18)}
-.btn.bad:hover{background:rgba(255,59,59,.2);border-color:#ff3b3b}
+
+/* ============ ALERT BUBBLES ============ */
+/* Chat-app cards, stacked upward from just above the footer. Colours come from the
+   active theme: --warn for a heads-up, --crit for something that needs you now. */
+/* bottom is set from the nowbar's measured position — the footer and the nowbar
+   both scale with --fs, so a fixed offset would overlap at large font sizes. */
+#alertStack{position:fixed;left:9px;right:9px;bottom:80px;z-index:60;
+  display:flex;flex-direction:column;gap:5px;pointer-events:none}
+body.mode-ball #alertStack{display:none}
+.alert{position:relative;pointer-events:auto;cursor:pointer;overflow:hidden;
+  padding:5px 8px 7px;border:1px solid rgba(var(--warn-rgb),.5);border-left:3px solid var(--warn);
+  background:linear-gradient(160deg,var(--bg1),var(--bg2));
+  box-shadow:0 0 14px rgba(var(--warn-rgb),.22);
+  animation:bubbleIn .18s ease-out both}
+.alert.crit{border-color:rgba(var(--crit-rgb),.55);border-left-color:var(--crit);
+  box-shadow:0 0 16px rgba(var(--crit-rgb),.32);
+  animation:bubbleIn .18s ease-out both, bubbleShake .45s ease-out .18s both}
+.alert.out{animation:bubbleOut .18s ease-in both}
+@keyframes bubbleIn{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
+@keyframes bubbleOut{to{opacity:0;transform:translateY(-6px) scale(.97)}}
+@keyframes bubbleShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-3px)}
+  45%{transform:translateX(3px)}70%{transform:translateX(-2px)}}
+.al-top{display:flex;align-items:center;gap:5px}
+.al-ico{font-size:calc(9px*var(--fs));color:var(--warn);text-shadow:0 0 7px var(--warn)}
+.alert.crit .al-ico{color:var(--crit);text-shadow:0 0 7px var(--crit)}
+.al-title{flex:1;min-width:0;font-size:calc(10px*var(--fs));font-weight:700;letter-spacing:1px;
+  color:var(--warn);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.alert.crit .al-title{color:var(--crit)}
+.al-x{flex:none;font-family:inherit;font-size:calc(11px*var(--fs));line-height:1;color:var(--dim);
+  background:none;border:none;cursor:pointer;padding:0 1px}
+.al-x:hover{color:var(--txt)}
+.al-detail{margin-top:2px;font-size:calc(9px*var(--fs));color:var(--txt);opacity:.82;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.al-drain{position:absolute;left:0;bottom:0;height:2px;background:var(--warn);
+  box-shadow:0 0 6px var(--warn);animation:drain 8s linear forwards}
+.alert.crit .al-drain{background:var(--crit);box-shadow:0 0 6px var(--crit)}
+@keyframes drain{from{width:100%}to{width:0}}
 </style>
 </head>
 <body class="mode-ball">
@@ -164,6 +288,8 @@ window.__CONFIG__ = __CONFIG_PAYLOAD__;
   <div class="ball-ring"></div>
   <img id="ballPet" class="ball-pet" alt="pet" draggable="false">
   <div id="ballStatus" class="ball-status">待命</div>
+  <div id="ballBadge" class="ball-badge" hidden>0</div>
+  <div id="ballAlert" class="ball-alert" hidden></div>
 </div>
 
 <!-- ============ PANEL ============ -->
@@ -171,18 +297,49 @@ window.__CONFIG__ = __CONFIG_PAYLOAD__;
   <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
   <div class="header">
     <span class="led" id="led"></span>
-    <span class="title" id="titleTxt"><b>C:\&gt;</b> CLAUDE.PET // CYBER</span>
+    <span class="title" id="titleTxt"><b>C:\&gt;</b> CLAUDE.PET</span>
     <span class="clock" id="clock">--:--:--</span>
-    <span class="fsctl"><button class="mini" id="fsMinus" title="缩小">−</button><button class="mini" id="fsPlus" title="放大">+</button></span>
+    <span class="alertbadge" id="alertBadge" hidden>0</span>
+    <button class="mini" id="bUsage" title="用量详情">▤</button>
     <button class="mini" id="bCollapse" title="收起为球">⇲</button>
   </div>
   <div class="statebox">
     <div class="stateline"><span id="state">BOOT</span><span class="cn" id="statecn"></span></div>
     <div class="bar"><i id="fill"></i><u id="age">AGE --</u></div>
   </div>
+  <div class="ubar" id="usageBar" title="点击查看用量详情">
+    <span>↑<b id="uIn">—</b></span>
+    <span>↓<b id="uOut">—</b></span>
+    <span class="uctx">CTX<b id="uCtxPct">--%</b><i class="ufill"><i id="uFill"></i></i></span>
+  </div>
   <div class="stage">
     <div class="panel-ring"></div>
     <img id="pet" alt="pet" draggable="false">
+    <div id="usageView" hidden>
+      <div class="uv-tabs">
+        <button class="uv-tab on" data-tab="session">本次</button>
+        <button class="uv-tab" data-tab="today">今日</button>
+        <button class="uv-tab" data-tab="total">累计</button>
+      </div>
+      <div class="uv-grid">
+        <div class="uv-cell"><span class="uv-k">输入（含缓存）</span><span class="uv-v" id="uvIn">0</span></div>
+        <div class="uv-cell"><span class="uv-k">输出</span><span class="uv-v" id="uvOut">0</span></div>
+        <div class="uv-cell"><span class="uv-k">缓存命中</span><span class="uv-v" id="uvHit">—</span></div>
+        <div class="uv-cell"><span class="uv-k">API 调用</span><span class="uv-v" id="uvMsgs">0</span></div>
+      </div>
+      <div class="uv-ctx" id="uvCtxRow">
+        <span>上下文</span>
+        <span class="uv-bar"><i id="uvFill"></i></span>
+        <span id="uvCtx">— / —</span>
+      </div>
+      <div class="uv-spark" id="uvSpark"></div>
+      <div class="uv-foot">
+        <span>告警</span><button class="uv-toggle on" id="uvAlerts">开</button>
+        <span class="sp">字号</span>
+        <button class="uv-toggle" id="uvFsMinus">A−</button>
+        <button class="uv-toggle" id="uvFsPlus">A+</button>
+      </div>
+    </div>
   </div>
   <div class="nowbar"><b>现在:</b><span id="now">—</span></div>
   <div class="footer">
@@ -190,12 +347,11 @@ window.__CONFIG__ = __CONFIG_PAYLOAD__;
     <div class="btns">
       <button class="btn" id="bTheme">主题</button>
       <button class="btn" id="bTerm">终端</button>
-      <button class="btn" id="bDebug">调试</button>
-      <button class="btn bad" id="bExit">退出</button>
     </div>
   </div>
 </div>
 
+<div id="alertStack"></div>
 <div id="bubbles"></div>
 <div id="toast"></div>
 
@@ -220,10 +376,13 @@ const THEMES = ['cyber','paper','matrix','gold','sunset','ocean'];
 const THEME_NAMES = { cyber:'CYBER', paper:'PAPER', matrix:'MATRIX', gold:'GOLD', sunset:'SUNSET', ocean:'OCEAN' };
 const FS_MIN = 0.85, FS_MAX = 1.35;
 const BALL_W = 150, BALL_H = 170, PANEL_W = 320, PANEL_H = 480;
+const ALERT_TTL = 8000, ALERT_MAX = 3;   // how long a bubble lives, how many stack
 
 const ball = document.getElementById('ball');
 const ballPet = document.getElementById('ballPet');
 const ballStatus = document.getElementById('ballStatus');
+const ballBadge = document.getElementById('ballBadge');
+const ballAlert = document.getElementById('ballAlert');
 const bubblesEl = document.getElementById('bubbles');
 const petImg = document.getElementById('pet');
 const led = document.getElementById('led');
@@ -238,9 +397,28 @@ const forcedTag = document.getElementById('forcedTag');
 const titleTxt = document.getElementById('titleTxt');
 const toast = document.getElementById('toast');
 const nowEl = document.getElementById('now');
+const alertBadge = document.getElementById('alertBadge');
+const alertStack = document.getElementById('alertStack');
+const usageBar = document.getElementById('usageBar');
+const uIn = document.getElementById('uIn');
+const uOut = document.getElementById('uOut');
+const uCtxPct = document.getElementById('uCtxPct');
+const uFill = document.getElementById('uFill');
+const usageViewEl = document.getElementById('usageView');
+const uvIn = document.getElementById('uvIn');
+const uvOut = document.getElementById('uvOut');
+const uvHit = document.getElementById('uvHit');
+const uvMsgs = document.getElementById('uvMsgs');
+const uvCtxRow = document.getElementById('uvCtxRow');
+const uvCtx = document.getElementById('uvCtx');
+const uvFill = document.getElementById('uvFill');
+const uvSpark = document.getElementById('uvSpark');
+const uvAlerts = document.getElementById('uvAlerts');
+const bUsage = document.getElementById('bUsage');
 
 let theme = 'cyber', fs = 1, mode = 'ball', prevState = null, curOpacity = 100;
 let lastGif = null, bust = 0, lastState = null, topmost = true;
+let usageOpen = false, uvTab = 'session';
 
 function setVar(n, v){ document.documentElement.style.setProperty(n, v); }
 function toastMsg(t){ toast.textContent = t; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'), 900); }
@@ -263,6 +441,36 @@ function setMode(m){
   document.body.className = 'mode-' + m;
   if (m === 'panel') callHost('Resize', PANEL_W, PANEL_H);
   else callHost('Resize', BALL_W, BALL_H);
+}
+
+// ---- drag (ball and panel share it) ----
+// The ball used to be the only draggable thing, which left the panel stranded
+// wherever the ball happened to be. The panel's header + state box now behave like
+// a title bar. A movement under 2px stays a click, so the buttons still work.
+function makeDraggable(el, opts){
+  const skip = (opts && opts.skip) || function(){ return false; };
+  let drag = null, moved = false;
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button === 2) return;              // right-click is the bubble menu
+    if (skip(e.target)) return;              // buttons inside the drag zone
+    el.setPointerCapture(e.pointerId);
+    drag = { x: e.screenX, y: e.screenY };
+    moved = false;
+    el.classList.add('dragging');
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dx = e.screenX - drag.x, dy = e.screenY - drag.y;
+    drag.x = e.screenX; drag.y = e.screenY;
+    // screenX/Y, not clientX/Y: the window moves under the cursor, so page
+    // coordinates would feed the delta back into itself.
+    if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+    if (moved) callHost('Move', dx, dy);
+  });
+  function end(){ drag = null; el.classList.remove('dragging'); }
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+  return { moved: () => moved, dragging: () => !!drag };
 }
 
 // ---- state ----
@@ -295,33 +503,50 @@ function applyState(j){
   }
   prevState = s;
 }
-function notify(msg){ toastMsg(msg); beep(); }
+function notify(msg){ toastMsg(msg); beep(880, 0.18); }
 // One AudioContext for the whole page. Creating one per beep leaked, and the
 // browser starts throwing after a handful of them (the pet went silent).
 let audioCtx = null;
-function beep(){
+function beep(freq, dur){
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
     if (!audioCtx) audioCtx = new Ctx();
     if (audioCtx.state === 'suspended' && audioCtx.resume) audioCtx.resume();
     const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
-    o.connect(g); g.connect(audioCtx.destination); o.frequency.value = 880; g.gain.value = 0.08;
-    o.start(); o.stop(audioCtx.currentTime + 0.18);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.frequency.value = freq || 880; g.gain.value = 0.08;
+    o.start(); o.stop(audioCtx.currentTime + (dur || 0.18));
   } catch(_){}
+}
+// A critical alert gets two rising tones so it is distinguishable without looking.
+function alertBeep(level){
+  if (level === 'crit'){ beep(520, 0.12); setTimeout(() => beep(780, 0.16), 130); }
+  else beep(660, 0.14);
 }
 
 // ---- theme / font / config ----
 // The server owns the preferences (app/config.json) and hands them back through
 // __CONFIG__ on every load, so the page keeps no copy of its own. It used to
 // write localStorage as well — two sources that disagreed after a manual edit.
-function persistConfig(){
-  try { fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({theme, fs})}).catch(()=>{}); } catch(_){}
+function persistConfig(extra){
+  try {
+    const body = Object.assign({ theme, fs }, extra || {});
+    fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)})
+      .then((r) => r.json())
+      .then((j) => { if (j && j.config) window.__CONFIG__ = j.config; })
+      .catch(()=>{});
+  } catch(_){}
 }
+function alertCfg(){
+  const c = (window.__CONFIG__ && window.__CONFIG__.usage) || {};
+  return c;
+}
+function alertsOn(){ return alertCfg().enabled !== false; }
 function applyTheme(t){
   theme = t;
   document.documentElement.setAttribute('data-theme', t);
-  titleTxt.innerHTML = '<b>C:\\&gt;</b> CLAUDE.PET // ' + (THEME_NAMES[t] || 'CYBER');
+  titleTxt.title = 'CLAUDE.PET // ' + (THEME_NAMES[t] || 'CYBER');
   if (lastState) applyState(lastState);
   persistConfig();
 }
@@ -338,6 +563,145 @@ function tick(){
   }
 }
 
+// ---- usage ----
+// Same compact format as fmtTok() in app/usage.js — the page is a static file with
+// no imports, so the two copies have to stay in step (like TOOL_LABELS/TOOL_CN).
+function fmtTok(n){
+  const v = Number(n) || 0;
+  const trim = (s) => s.replace(/\.0$/, '');
+  if (v < 1000) return String(Math.round(v));
+  if (v < 1e6) return trim((v/1000).toFixed(1)) + 'k';
+  return trim((v/1e6).toFixed(1)) + 'M';
+}
+function ctxLevel(pct){
+  const c = alertCfg();
+  if (pct >= (c.ctxCritPct || 92)) return 'over';
+  if (pct >= (c.ctxWarnPct || 80)) return 'warn';
+  return '';
+}
+function renderUsage(u){
+  if (!u) return;
+  const ready = !!u.ready;
+  const s = u.session || {};
+  const pct = (u.ctx && u.ctx.pct) || 0;
+  uIn.textContent = ready ? fmtTok(s.input) : '…';
+  uOut.textContent = ready ? fmtTok(s.out) : '…';
+  uCtxPct.textContent = ready ? pct + '%' : '--%';
+  uFill.style.width = (ready ? pct : 0) + '%';
+  const lv = ready ? ctxLevel(pct) : '';
+  usageBar.classList.toggle('warn', lv === 'warn');
+  usageBar.classList.toggle('over', lv === 'over');
+  usageBar.title = '本次会话 token · 上下文 ' + pct + '% — 点击查看详情';
+}
+function renderUsageView(u){
+  if (!u) return;
+  const b = (uvTab === 'session' ? u.session : uvTab === 'today' ? u.today : u.total) || {};
+  uvIn.textContent = fmtTok(b.input);
+  uvOut.textContent = fmtTok(b.out);
+  uvHit.textContent = (b.hit === null || b.hit === undefined) ? '—' : b.hit + '%';
+  uvMsgs.textContent = String(b.msgs || 0);
+
+  const ctx = u.ctx || { tokens:0, window:0, pct:0 };
+  // The context figure is a property of the running session, not of a day bucket.
+  uvCtxRow.hidden = uvTab !== 'session';
+  uvCtx.textContent = fmtTok(ctx.tokens) + ' / ' + fmtTok(ctx.window);
+  uvFill.style.width = ctx.pct + '%';
+  uvFill.className = ctxLevel(ctx.pct);
+
+  const spark = u.spark || [];
+  const max = Math.max(1, spark.map((d) => d.tokens).reduce((a, c) => Math.max(a, c), 0));
+  uvSpark.innerHTML = '';
+  spark.forEach((d, i) => {
+    const el = document.createElement('i');
+    el.style.height = Math.max(3, Math.round((d.tokens / max) * 100)) + '%';
+    if (!d.tokens) el.classList.add('zero');
+    if (i === spark.length - 1) el.classList.add('today');
+    el.title = d.day + ' · ' + fmtTok(d.tokens) + ' tokens';
+    uvSpark.appendChild(el);
+  });
+}
+function setUsagePage(on){
+  usageOpen = on;
+  usageViewEl.hidden = !on;
+  bUsage.classList.toggle('on', on);
+  document.body.classList.toggle('usage-mode', on);
+  if (on && lastState) renderUsageView(lastState.usage);
+}
+function syncAlertsToggle(){
+  const on = alertsOn();
+  uvAlerts.classList.toggle('on', on);
+  uvAlerts.textContent = on ? '开' : '关';
+}
+
+// ---- alerts ----
+// The server owns the rule engine (edge-triggered + cooldown, see app/alerts.js) and
+// ships the current list in every frame. The page only decides presentation: a badge
+// while collapsed, bubbles while open. A bubble pops once per firing — keyed on
+// firedAt, so a reconnect or a reload never replays an old alert.
+const seenAlerts = new Map();
+let firstFrame = true;
+
+function renderAlerts(list){
+  const all = list || [];
+  const active = all.filter((a) => a.active);
+
+  alertBadge.hidden = active.length === 0;
+  alertBadge.textContent = active.length;
+  ballBadge.hidden = active.length === 0;
+  ballBadge.textContent = active.length;
+  ballAlert.hidden = active.length === 0;
+  ballAlert.textContent = active.length ? (active[0].title + ' · ' + active[0].detail) : '';
+
+  if (!all.length){ alertStack.innerHTML = ''; return; }
+
+  for (const a of all){
+    if (!a.firedAt) continue;
+    if (seenAlerts.get(a.id) === a.firedAt) continue;
+    seenAlerts.set(a.id, a.firedAt);
+    if (firstFrame) continue;                       // never replay history on load
+    // Collapsed and something critical: open up rather than expect the user to
+    // notice a red dot. Once per firing, and never mid-drag.
+    if (mode === 'ball' && a.level === 'crit' && !ballDrag.dragging()) setMode('panel');
+    pushAlertBubble(a);
+  }
+}
+// Sit the stack just above the "现在" line rather than at a fixed offset: the footer
+// and that line both grow with --fs.
+function positionAlertStack(){
+  const bar = document.querySelector('.nowbar');
+  if (!bar) return;
+  const top = bar.getBoundingClientRect().top;
+  alertStack.style.bottom = Math.max(8, window.innerHeight - top + 5) + 'px';
+}
+function pushAlertBubble(a){
+  positionAlertStack();
+  const el = document.createElement('div');
+  el.className = 'alert' + (a.level === 'crit' ? ' crit' : '');
+  el.innerHTML = '<div class="al-top"><span class="al-ico"></span>' +
+    '<span class="al-title"></span><button class="al-x" title="关闭">×</button></div>' +
+    '<div class="al-detail"></div><i class="al-drain"></i>';
+  // textContent, not innerHTML: the detail string is built server-side from
+  // transcript data, and this page does not inject that as markup.
+  el.querySelector('.al-ico').textContent = a.level === 'crit' ? '▲' : '△';
+  el.querySelector('.al-title').textContent = a.title;
+  el.querySelector('.al-detail').textContent = a.detail;
+
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 200);
+  };
+  el.querySelector('.al-x').addEventListener('click', (e) => { e.stopPropagation(); close(); });
+  el.addEventListener('click', close);
+  setTimeout(close, ALERT_TTL);
+
+  alertStack.appendChild(el);
+  while (alertStack.children.length > ALERT_MAX) alertStack.removeChild(alertStack.firstChild);
+  alertBeep(a.level);
+}
+
 function render(json){
   lastState = json;
   applyState(json);
@@ -348,6 +712,10 @@ function render(json){
   termEl.textContent = json.term ? (json.termAlive ? 'PID ' + json.term : 'GONE') : '--';
   forcedTag.textContent = json.forced ? '[DBG]' : '';
   if (json.lastAction) nowEl.textContent = json.lastAction;
+  renderUsage(json.usage);
+  renderAlerts(json.alerts);
+  if (usageOpen) renderUsageView(json.usage);
+  firstFrame = false;
 }
 
 function dismiss(){ persistConfig(); callHost('Close'); try { window.close(); } catch(_){} }
@@ -426,24 +794,14 @@ function bubbleAction(act){
   hideBubbles();
 }
 
-// ---- ball interactions ----
-let dragMoved = false;
-ball.addEventListener('pointerdown', (e) => {
-  if (e.button === 2) return;               // right-click handled by contextmenu
-  ball.setPointerCapture(e.pointerId);
-  ball._drag = { x: e.screenX, y: e.screenY };
-  dragMoved = false;
-  ball.classList.add('dragging');
-});
-ball.addEventListener('pointermove', (e) => {
-  if (!ball._drag) return;
-  const dx = e.screenX - ball._drag.x, dy = e.screenY - ball._drag.y;
-  ball._drag.x = e.screenX; ball._drag.y = e.screenY;
-  if (Math.abs(dx) + Math.abs(dy) > 2) dragMoved = true;
-  if (dragMoved) callHost('Move', dx, dy);
-});
-ball.addEventListener('pointerup', () => { ball._drag = null; ball.classList.remove('dragging'); });
-ball.addEventListener('click', () => { if (!dragMoved) setMode('panel'); });
+// ---- ball + panel drag ----
+const ballDrag = makeDraggable(ball);
+const isButton = (t) => !!(t && t.closest && t.closest('button'));
+makeDraggable(document.querySelector('.header'), { skip: isButton });
+makeDraggable(document.querySelector('.statebox'), { skip: isButton });
+// .header and .statebox get cursor:move from the stylesheet, not from here.
+
+ball.addEventListener('click', () => { if (!ballDrag.moved()) setMode('panel'); });
 
 // hover >1s expands the panel; mouse away >3s returns to ball
 let hoverTimer = null, leaveTimer = null;
@@ -467,17 +825,37 @@ document.addEventListener('click', (e) => { if (!e.target.closest('.bubble')) hi
 // ---- panel actions ----
 document.getElementById('bTheme').onclick = () => { cycleTheme(); };
 document.getElementById('bTerm').onclick = () => { api('/api/terminal?act=toggle'); toastMsg('TERM TOGGLE'); };
-document.getElementById('bDebug').onclick = () => { api('/api/debug?cycle=1'); toastMsg('DBG'); };
-document.getElementById('bExit').onclick = () => { persistConfig(); callHost('Close'); api('/api/exit'); };
 document.getElementById('bCollapse').onclick = () => setMode('ball');
-document.getElementById('fsPlus').onclick = () => { applyFs(fs + 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); };
-document.getElementById('fsMinus').onclick = () => { applyFs(fs - 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); };
+bUsage.onclick = () => setUsagePage(!usageOpen);
+usageBar.onclick = () => setUsagePage(!usageOpen);
+// A bubble only pops the moment an alert fires. Opening the panel later shows the
+// badge but no detail, so the badge replays whatever is still active on demand.
+alertBadge.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const active = ((lastState && lastState.alerts) || []).filter((a) => a.active);
+  if (!active.length) return;
+  if (mode === 'ball') setMode('panel');
+  active.slice().reverse().forEach((a, i) => setTimeout(() => pushAlertBubble(a), i * 90));
+});
+document.getElementById('uvFsPlus').onclick = () => { applyFs(fs + 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); };
+document.getElementById('uvFsMinus').onclick = () => { applyFs(fs - 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); };
+uvAlerts.onclick = () => {
+  const next = !alertsOn();
+  uvAlerts.classList.toggle('on', next);
+  uvAlerts.textContent = next ? '开' : '关';
+  persistConfig({ usage: { enabled: next } });
+  toastMsg(next ? '告警已开' : '告警已关');
+};
+document.querySelectorAll('.uv-tab').forEach((t) => t.addEventListener('click', () => {
+  uvTab = t.dataset.tab;
+  document.querySelectorAll('.uv-tab').forEach((x) => x.classList.toggle('on', x === t));
+  if (lastState) renderUsageView(lastState.usage);
+}));
 petImg.addEventListener('dblclick', () => api('/api/focus'));
+usageViewEl.addEventListener('dblclick', () => api('/api/focus'));
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 't' || e.key === 'T') cycleTheme();
-  if (e.key === 'd' || e.key === 'D'){ api('/api/debug?cycle=1'); toastMsg('DBG'); }
-  if (e.key === 'Escape'){ persistConfig(); callHost('Close'); api('/api/exit'); }
   if (e.key === '+' || e.key === '='){ applyFs(fs + 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); }
   if (e.key === '-' || e.key === '_'){ applyFs(fs - 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); }
 });
@@ -495,6 +873,7 @@ window.addEventListener('pagehide', persistConfig);
   theme = st; fs = Math.min(FS_MAX, Math.max(FS_MIN, sf));
   applyTheme(theme); applyFs(fs);
   setMode('ball');                       // start as a compact ball
+  syncAlertsToggle();
   render(window.__INIT__ || {});
   tick();
   connect();

@@ -7,6 +7,10 @@ _server.log
 app/config.json
 app/host.json
 app/runtime.ini
+# token usage ledger - a running total over this machine's transcripts, rebuilt
+# from scratch if deleted, so it must never be committed or shipped
+app/usage.json
+app/usage.json.tmp
 edge_profile/
 host/webview2data/
 host/ClaudePet.Host.exe

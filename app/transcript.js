@@ -24,10 +24,12 @@ const DEFAULT_DIR = path.join(os.homedir(), '.claude', 'projects');
 // re-evaluated against the current clock even when the file has not moved.
 let cache = null; // { dir, path, mtimeMs, size, parsed }
 
-function newestTranscript(dir) {
-  let best = null, bestT = 0, bestSize = 0;
+// Every .jsonl under <dir>/<project>/, with the stat each caller needs. Shared
+// with usage.js so the projects tree is walked one way, not two.
+function listTranscripts(dir) {
+  const out = [];
   let projects;
-  try { projects = fs.readdirSync(dir); } catch { return null; }
+  try { projects = fs.readdirSync(dir); } catch { return out; }
   for (const proj of projects) {
     const d = path.join(dir, proj);
     let files;
@@ -40,11 +42,19 @@ function newestTranscript(dir) {
       const p = path.join(d, f);
       try {
         const st = fs.statSync(p);
-        if (st.mtimeMs > bestT) { bestT = st.mtimeMs; best = p; bestSize = st.size; }
+        out.push({ path: p, mtimeMs: st.mtimeMs, size: st.size });
       } catch { /* raced with a write */ }
     }
   }
-  return best ? { path: best, mtimeMs: bestT, size: bestSize } : null;
+  return out;
+}
+
+function newestTranscript(dir) {
+  let best = null;
+  for (const f of listTranscripts(dir)) {
+    if (!best || f.mtimeMs > best.mtimeMs) best = f;
+  }
+  return best;
 }
 
 function readTail(file, size) {
@@ -158,6 +168,6 @@ function snapshot(opts) {
 function reset() { cache = null; }
 
 module.exports = {
-  snapshot, reset, newestTranscript, parseTail, errorOf, classify,
+  snapshot, reset, newestTranscript, listTranscripts, parseTail, errorOf, classify,
   DEFAULT_DIR, TAIL_BYTES, ERROR_WINDOW_MS,
 };

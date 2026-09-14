@@ -8,7 +8,9 @@
 │  app/pet.html (HUD+GIF)    │                │                                │
 │  双击→/api/focus 等交互     │  POST /event   │  · state.js    纯状态机        │
 └────────────────────────────┘◄───────────────│  · transcript.js 转录快照      │
-        ▲                        hooks 转发    │  · util.js     SSR 安全注入    │
+        ▲                        hooks 转发    │  · usage.js    token 用量账本   │
+        │                                      │  · alerts.js   用量告警规则     │
+        │                                      │  · util.js     SSR 安全注入    │
         │                                      │  · PowerShell 窗口操作          │
         │                                      └────┬──────────────┬────────────┘
         │                                           │ 回退读取      │ 兜底探活
@@ -78,15 +80,53 @@ hooks 没装时架构自动退回第 2、3 层，功能不减，只是精度下�
 - **退出锚在终端 PID**：`start-both.bat` 拉起的终端 PID 记在 `app/term.pid`，死了就进入关闭流程（客户端收到 `shutdown:true` 后 `window.close()`，服务端 800ms 后强杀宿主兜底）。手动起的 claude 不受这条约束——它们是状态来源，不是生死判据。
 - **窗口存活**：`/api/window` 在"有 SSE 连接"或"5s 内被访问过"时返回 `1`，供 `start-both.bat` 幂等判断要不要开窗。
 
+## Token 用量与告警
+
+第四个信号源，和转录同源但**独立节奏**：读的是每条 assistant 行的 `message.usage`。
+
+```
+~/.claude/projects/**.jsonl
+        │  transcript.listTranscripts()（两个模块共用同一次目录遍历）
+        ▼
+  usage.js  createScanner().step(budget)          ← 4s 一轮，不进 500ms 的 tick
+        │    每个文件记字节水位线 read，只读新增区间；
+        │    只处理到最后一个换行为止（尾部常是半行）；
+        │    size 变小 = 被重写 → 先减掉旧贡献再重算
+        ▼
+   usage.json（账本）  files / total / days / sessions / recent / lastTurn
+        │
+        ▼
+  usage.snapshot(ledger, {session})  →  本次 / 今日 / 累计 / ctx / spark
+        │
+        ▼
+  alerts.reduce(state, usage, now, cfg)  →  活跃告警 + 本帧新触发
+        │
+        ▼
+  stateJson().usage / .alerts  →  SSE  →  面板瘦条 / 用量页 / 告警气泡
+```
+
+**为什么必须按 `message.id` 去重**：一条 API 响应按内容块（thinking / text / tool_use）连续写 2~4 行，
+每行带**完全相同**的 `usage`。实测 4852 行 → 1763 个唯一 id，按行计虚报 2.75 倍行数、3.13 倍 token。
+去重分两层：批内连续 id + 每文件 32 个 id 的环形缓冲（跨扫描边界）。
+
+**为什么告警必须边沿触发**：v2.0.0 修过一次"`error` 状态每 500ms 响一次"，用量告警是同一个坑——
+上下文占用会在阈值上方停留很久。所以条件成立只报一次，回落后才重新武装；冷却只作为抖动兜底，
+**冷却期内不放行但保持武装**（否则"压缩上下文后再次涨满"会被静默吃掉）。
+另外首次建账那一帧必须跳过速率类规则：账本从 0 跳到全量语料，看起来就是一次巨大暴涨。
+
+**不显示金额**：不内置任何价目表。模型名与单价因代理 / 第三方网关而异，猜一个数字不如不给。
+
 ## 文件职责
 
 | 文件 | 职责 |
 |---|---|
 | `app/state.js` | 纯状态机（`reduce` / `computeAlive` / `STATES`）— 无 IO，可直接单测 |
 | `app/transcript.js` | 转录快照：一次目录扫描 + 一次尾部读，按 (path,size,mtime) 缓存解析结果 |
+| `app/usage.js` | token 账本：增量扫描 + 按 `message.id` 去重 + 聚合桶；落盘 `usage.json` |
+| `app/alerts.js` | 告警规则（纯函数）：边沿触发 + 冷却 + 配置 clamp |
 | `app/util.js` | `safeJson`：SSR 注入用的转义（`<` / U+2028 / U+2029） |
 | `app/server.js` | HTTP 服务、SSE、hook 事件入口、进程探活、PowerShell 调用、配置读写 |
-| `app/pet.html` | HUD UI：霓虹样式、SSE 订阅、交互按钮、键盘快捷键 |
+| `app/pet.html` | HUD UI：霓虹样式、SSE 订阅、拖动、用量页、告警气泡、键盘快捷键 |
 | `app/notify.cmd` | hook 转发器：把 stdin 上的事件 JSON 原样 POST 给服务，**永远 exit 0** |
 | `app/hooks.js` | 幂等写入/移除 `~/.claude/settings.json` 里的 hooks（带 `.claudepet.bak` 备份） |
 | `app/pet.ps1` | 开宿主窗、焦点/最小化/还原终端（ShowWindow P/Invoke） |
@@ -103,6 +143,8 @@ hooks 没装时架构自动退回第 2、3 层，功能不减，只是精度下�
   没有这道校验时，任意网页都能用一行 `fetch('http://127.0.0.1:9876/api/exit', {method:'POST'})` 关掉桌宠——简单请求不触发预检，CORS 只挡读、不挡执行。
 - **SSR 注入转义**：`safeJson` 把 `<`（以及 U+2028/U+2029 两个行分隔符）转义掉，注入的 JSON 因此不可能提前闭合它所在的 `<script>` 标签。
   `lastAction` 的值来自转录里的工具名（模型输出），不转义就等于把用户数据注入进页面。
-- 只读扫描转录文件，不修改用户数据；运行期文件（`term.pid`、`config.json`、`host.json`、`webview2data/`）都在安装目录内。
+- 只读扫描转录文件，不修改用户数据；运行期文件（`term.pid`、`config.json`、`host.json`、`usage.json`、`webview2data/`）都在安装目录内。
+  `usage.json` 是唯一的写入型聚合产物，且只是缓存——删掉即从转录重建（但 `days`/`total` 是累计和，重建后从 0 起算）。
+- **告警文本走 `textContent`**：`alerts.js` 拼出的 `detail` 含转录派生的数字与模型名，面板把它当文本插入，不当标签。
 - 改 `~/.claude/settings.json` 仅限 hooks 一项，且只增删带 `notify.cmd` 标记的条目，首次安装前自动备份。
 - 零外部依赖：Node 内置模块 + 系统自带 PowerShell / curl / WebView2 运行时。

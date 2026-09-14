@@ -15,6 +15,8 @@ const os = require('os');
 const { exec, execFile } = require('child_process');
 const st = require('./state');
 const transcript = require('./transcript');
+const usage = require('./usage');
+const alerts = require('./alerts');
 const { safeJson } = require('./util');
 
 const ROOT = __dirname;
@@ -22,6 +24,7 @@ const HTML_FILE = path.join(ROOT, 'pet.html');
 const PS_FILE = path.join(ROOT, 'pet.ps1');
 const TERM_PID_FILE = path.join(ROOT, 'term.pid');
 const CONFIG_FILE = path.join(ROOT, 'config.json');
+const USAGE_FILE = path.join(ROOT, 'usage.json');
 const RUNTIME_FILE = path.join(ROOT, 'runtime.ini');
 const PROJECTS_DIR = transcript.DEFAULT_DIR;
 
@@ -37,6 +40,12 @@ const SHUTDOWN_HOLD_MS = 2500; // self-exit within 5s of terminal death
 const WINDOW_STALE_MS = 5000;  // pet window considered alive if seen within 5s
 const PROBE_INTERVAL_MS = 8000;// re-run the process probe at most every 8s
 const HEARTBEAT_MS = 15000;    // SSE keep-alive
+// Usage scanning is deliberately NOT part of the 500ms tick. Steady state it is one
+// readdir plus a stat per transcript (well under a millisecond); the first pass
+// over an existing corpus is the only expensive one, and that is sliced so it can
+// never stall a tick.
+const USAGE_INTERVAL_MS = 4000;
+const USAGE_SLICE_MS = 15;
 
 const CFG = Object.assign({}, st.DEFAULTS, {
   DONE_HOLD_MS,
@@ -80,11 +89,67 @@ let lastHookAt = 0;
 let lastHookActivity = null;    // { kind, ts, tool }
 
 // ---- persisted UI config (server is the single source of truth) ----
-let config = { theme: 'cyber', fs: 1 };
-try { config = Object.assign(config, JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'))); } catch {}
+// Read key by key rather than Object.assign: a hand-edited config.json must not be
+// able to inject arbitrary state, and the alert thresholds need clamping anyway.
+let config = { theme: 'cyber', fs: 1, usage: alerts.sanitize(null) };
+try {
+  const raw = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+  if (raw && typeof raw === 'object') {
+    if (typeof raw.theme === 'string') config.theme = raw.theme;
+    if (typeof raw.fs === 'number') config.fs = raw.fs;
+    config.usage = alerts.sanitize(raw.usage);
+  }
+} catch {}
 function saveConfig() {
   try { fs.writeFileSync(CONFIG_FILE, JSON.stringify(config), 'utf8'); } catch {}
 }
+
+// ---- token usage ledger ----
+let ledger = usage.loadLedger(USAGE_FILE);
+let scanner = usage.createScanner({ dir: PROJECTS_DIR, ledger });
+let usageReady = false;    // true once a full pass has completed
+let usageDirty = false;    // something changed since the last save
+let sweeping = false;      // a sliced pass is in flight
+let activeSession = null;  // transcript the panel is reporting on
+let lastUsage = usage.snapshot(ledger, { ready: false, now: Date.now() });
+let alertState = alerts.createState();
+let currentAlerts = [];
+
+function usageSnapshot() {
+  return usage.snapshot(ledger, {
+    session: activeSession, cfg: config.usage, ready: usageReady, now: Date.now(),
+  });
+}
+
+// One pass per interval, sliced so the first full scan never blocks the tick loop.
+function usageTick() {
+  if (sweeping) return;
+  sweeping = true;
+  const run = () => {
+    let r;
+    try { r = scanner.step(USAGE_SLICE_MS); } catch { sweeping = false; return; }
+    if (r.changed) usageDirty = true;
+    if (!r.done) return setImmediate(run);
+    sweeping = false;
+    usageReady = true;
+    if (usageDirty) { usage.saveLedger(USAGE_FILE, ledger); usageDirty = false; }
+  };
+  run();
+}
+// Throw the ledger away and count from zero. Rare, but the only way back if the
+// transcripts were deleted (the day/total buckets are running sums, not derivable).
+function resetLedger() {
+  ledger = usage.createLedger();
+  scanner = usage.createScanner({ dir: PROJECTS_DIR, ledger });
+  usageReady = false;
+  usageDirty = false;
+  lastUsage = usage.snapshot(ledger, { ready: false, now: Date.now() });
+  try { fs.unlinkSync(USAGE_FILE); } catch {}
+  setTimeout(usageTick, 50);
+}
+
+setTimeout(usageTick, 120);
+setInterval(usageTick, USAGE_INTERVAL_MS);
 
 // runtime paths (node/claude) written by the installer so the pet works
 // even when PATH has no node/claude. Key=value ASCII in app/runtime.ini.
@@ -266,6 +331,7 @@ async function tick() {
   pruneSessions(now);
 
   const snap = transcript.snapshot({ now });
+  if (snap.path) activeSession = path.basename(snap.path, '.jsonl');
   const activity = currentActivity(snap, now);
   const actTs = Math.max(snap.mtime, lastHookAt, snap.msg ? snap.msg.ts : 0);
   if (actTs) lastActivity = actTs;
@@ -289,6 +355,11 @@ async function tick() {
     error: lastError,
   };
   pet = st.reduce(pet, lastFacts, CFG);
+
+  lastUsage = usageSnapshot();
+  const ar = alerts.reduce(alertState, lastUsage, now, config.usage);
+  alertState = ar.state;
+  currentAlerts = ar.alerts;
 
   broadcast(false);
 
@@ -318,12 +389,21 @@ function stateJson() {
     error: !!lastError,
     shutdown: shuttingDown,
     runtime: { node: runtime.NODE || null, claude: runtime.CLAUDE || null },
+    usage: lastUsage,
+    alerts: currentAlerts,
     ts: now,
   };
 }
 
 function stateSig(s) {
-  return [s.state, s.tool, s.long, s.claude, s.hooked, s.termAlive, s.lastAction, s.error, s.shutdown, s.forced].join('|');
+  // The usage/alerts parts are what the panel re-renders from, so a new API call
+  // has to show up here — but only a compact digest of it, or every tick would
+  // count as a change and push a frame.
+  const u = s.usage || {};
+  const uSig = [u.ready ? 1 : 0, u.total ? u.total.msgs : 0, u.ctx ? u.ctx.tokens : 0].join(',');
+  const aSig = (s.alerts || []).map((a) => a.id + ':' + a.firedAt + ':' + (a.active ? 1 : 0)).join(',');
+  return [s.state, s.tool, s.long, s.claude, s.hooked, s.termAlive, s.lastAction, s.error,
+    s.shutdown, s.forced, uSig, aSig].join('|');
 }
 let lastSig = '';
 
@@ -421,6 +501,7 @@ const server = http.createServer((req, res) => {
       return sseHandler(req, res);
     }
     if (req.method === 'GET' && p === '/api/state') { windowSeenAt = Date.now(); return json(res, stateJson()); }
+    if (req.method === 'GET' && p === '/api/usage') return json(res, usageSnapshot());
     if (req.method === 'GET' && p === '/api/health') return json(res, { server: true, window: windowActive(), state: pet.state, shutdown: shuttingDown, hooked: hookEnabled });
     if (req.method === 'GET' && p === '/api/window') { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end(windowActive() ? '1' : '0'); return; }
 
@@ -442,15 +523,25 @@ const server = http.createServer((req, res) => {
         return json(res, { ok: true });
       }
       if (p === '/api/config') {
-        return readBody(req, 1024, (body) => {
+        return readBody(req, 4096, (body) => {
           try {
             const c = JSON.parse(body || '{}');
             if (typeof c.theme === 'string') config.theme = c.theme;
             if (typeof c.fs === 'number') config.fs = Math.min(1.35, Math.max(0.85, c.fs));
+            // Merged onto the live values, then clamped — a partial update from the
+            // panel must not reset the thresholds it did not mention.
+            if (c.usage && typeof c.usage === 'object') {
+              config.usage = alerts.sanitize(Object.assign({}, config.usage, c.usage));
+            }
             saveConfig();
             return json(res, { ok: true, config });
           } catch { return json(res, { ok: false }); }
         });
+      }
+      if (p === '/api/usage/rescan') {
+        if (sweeping) return json(res, { ok: false, error: 'scan in progress' }, 409);
+        resetLedger();
+        return json(res, { ok: true });
       }
       if (p === '/api/debug') {
         if (q.has('cycle')) {

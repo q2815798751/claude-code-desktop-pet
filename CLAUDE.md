@@ -12,6 +12,8 @@ app/                  ← 部署单元（必须保持扁平：server.js 与 pet.
   server.js            HTTP 服务 @127.0.0.1:9876 + SSE + hook 事件入口 + 进程探活
   state.js             纯状态机（无 IO、无全局，可直接单测）
   transcript.js        转录快照（一次扫描 + 一次尾部读，按 (path,size,mtime) 缓存）
+  usage.js             token 用量账本（增量扫描 jsonl，按 message.id 去重，落盘 usage.json）
+  alerts.js            用量告警规则（纯函数、边沿触发 + 冷却）
   util.js              safeJson：SSR 注入转义
   pet.html             赛博朋克 HUD，EventSource 订阅 /events 切 GIF
   notify.cmd           hook 转发器（stdin → POST /event，永远 exit 0）
@@ -38,6 +40,13 @@ docs/                  INSTALL / CONFIG / DESIGN / HOST
 7. **改 `~/.claude/settings.json` 只准动 hooks，且只动带 `notify.cmd` 标记的条目**——`app/hooks.js` 已封装
    （幂等、自动备份、保留他人条目）。不要手写这段 JSON，也不要碰 `env` 等其它字段。
 8. **`notify.cmd` 必须永远 `exit /b 0`**——它挂在每一次工具调用上，非零退出会在你的会话里刷警告。
+9. **token 统计必须按 `message.id` 去重**——同一条 API 响应会以 `thinking`/`text`/`tool_use` 分块连续写 2~4 行，
+   每行带**完全相同**的 `message.usage`。实测 4852 行只有 1763 个唯一 id：按行计会虚报 2.75 倍行数、3.13 倍 token。
+   `usage.js` 用「批内连续去重 + 32 个 id 的环形缓冲」两层拦。
+10. **用量扫描不得进入 500ms 的 tick**——单独节奏（4s）+ 按 `(size,mtime)` 水位线增量。稳态是 1 次 readdir + N 次 stat；
+    首次全量（36MB ≈ 200ms）用 `setImmediate` 切片，否则会卡住 tick 与首屏。
+11. **告警必须边沿触发**——见 CHANGELOG 里 v2.0.0 那条"每 500ms 响一次"的教训：条件持续成立时只能报一次，
+    回落才重新武装，另有冷却兜底。另外**首次建账那一帧不能评估速率类规则**（账本从 0 跳到全量语料 = 假暴涨）。
 
 ## 关键文件入口
 - 状态机与阈值：`app/state.js` 的 `DEFAULTS` 与 `reduce()`（优先级：shuttingDown → forced → error → !alive → 活动）。
@@ -46,6 +55,9 @@ docs/                  INSTALL / CONFIG / DESIGN / HOST
 - 转录解析：`app/transcript.js` 的 `parseTail()` / `classify()` / `errorOf()`。
 - 进程检测：`app/server.js` 的 `probeClaude()`（claude.exe 或 node 跑 claude CLI，排除自身）。
 - 工具中文名：`app/server.js` 的 `TOOL_LABELS` 与 `app/pet.html` 的 `TOOL_CN`（**两处要一致**）。
+- 用量账本：`app/usage.js` 的 `createScanner()` / `scanOne()` / `snapshot()`；去重与水位线都在 `ingest()`。
+- 告警规则：`app/alerts.js` 的 `RULES` / `reduce()`（边沿 + 冷却）/ `sanitize()`（配置白名单与 clamp）。
+- 面板拖动区：`app/pet.html` 的 `makeDraggable()`（球 + `.header` + `.statebox`）。
 - API 说明：见 `docs/CONFIG.md`。
 
 ## 测试流程

@@ -32,8 +32,14 @@ public class MainForm : Form
     private readonly string _hostCfgPath;
     private Dictionary<string, object> _cfg = new Dictionary<string, object>();
 
+    // Dragging fires MoveBy dozens of times a second and each one used to write
+    // host.json. Coalesce them: mark dirty, save once the movement has settled.
+    private readonly Timer _saveTimer = new Timer();
+    private bool _dirty;
+
     public const string TITLE = "CLAUDE.PET";
     private const int DEF_W = 150, DEF_H = 170;
+    private const int SAVE_SETTLE_MS = 400;
 
     [DllImport("dwmapi.dll")] public static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS m);
     [StructLayout(LayoutKind.Sequential)] public struct MARGINS { public int left, right, top, bottom; }
@@ -43,6 +49,9 @@ public class MainForm : Form
         _hostCfgPath = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "app", "host.json"));
         _bridge = new PetHostBridge(this);
         LoadHostConfig();
+
+        _saveTimer.Interval = SAVE_SETTLE_MS;
+        _saveTimer.Tick += (s, e) => { _saveTimer.Stop(); if (_dirty) { _dirty = false; SaveHostConfig(); } };
 
         Text = TITLE;
         FormBorderStyle = FormBorderStyle.None;      // no title bar / min / close
@@ -57,7 +66,7 @@ public class MainForm : Form
         Controls.Add(_web);
 
         Shown += async (s, e) => { try { await InitWebAsync(); } catch (Exception ex) { File.WriteAllText(_hostCfgPath + ".err", ex.ToString()); } };
-        FormClosing += (s, e) => SaveHostConfig();
+        FormClosing += (s, e) => { _saveTimer.Stop(); SaveHostConfig(); };
     }
 
     private bool GetBool(string k, bool d) { return _cfg.ContainsKey(k) ? Convert.ToBoolean(_cfg[k]) : d; }
@@ -84,12 +93,32 @@ public class MainForm : Form
     public void MoveBy(int dx, int dy)
     {
         Location = new Point(Location.X + dx, Location.Y + dy);
-        SaveHostConfig();
+        Touch();
     }
+
+    // Grow/shrink around the window CENTRE. Anchored at the top-left, the panel used
+    // to unfold down-right from wherever the ball sat, so the pet appeared to jump.
+    // The result is re-clamped so a pet parked in a corner cannot push the panel
+    // off-screen — which would also put the collapsed ball out of reach.
     public void ResizeWindow(int w, int h)
     {
-        Size = new Size(Math.Max(120, w), Math.Max(120, h));
-        SaveHostConfig();
+        int nw = Math.Max(120, w), nh = Math.Max(120, h);
+        int cx = Location.X + Size.Width / 2;
+        int cy = Location.Y + Size.Height / 2;
+        Rectangle sa = Screen.FromPoint(new Point(cx, cy)).WorkingArea;
+
+        Size = new Size(nw, nh);
+        int nx = Math.Max(sa.Left, Math.Min(cx - nw / 2, sa.Right - nw));
+        int ny = Math.Max(sa.Top, Math.Min(cy - nh / 2, sa.Bottom - nh));
+        Location = new Point(nx, ny);
+        Touch();
+    }
+
+    private void Touch()
+    {
+        _dirty = true;
+        _saveTimer.Stop();
+        _saveTimer.Start();
     }
     public void SetOpacity(int percent)
     {
@@ -129,6 +158,7 @@ public class MainForm : Form
         _cfg["winW"] = Size.Width; _cfg["winH"] = Size.Height;
         if (!_cfg.ContainsKey("opacity")) _cfg["opacity"] = 100;
         _cfg["topmost"] = TopMost;
+        _dirty = false;
         try
         {
             var ser = new JavaScriptSerializer();
