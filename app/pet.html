@@ -194,8 +194,15 @@ body.mode-panel #ball{display:none}
 .panel-ring{position:absolute;width:calc(var(--pet-size)*1.08);height:calc(var(--pet-size)*1.08);border-radius:50%;
   border:1px solid rgba(var(--ac-rgb),.16);box-shadow:0 0 30px rgba(var(--ac-rgb),.10);
   animation:spin 14s linear infinite}
-:root{--pet-size:clamp(150px, min(62%, 210px), 210px)}
+/* The 120px floor only binds while a full stack of alert bubbles is squeezing the
+   stage; at rest 62% of a 300px stage wins and the pet sits at ~186px. A higher
+   floor (150px, as it was) made the pet taller than the space left, so it got
+   clipped and overlapped the bubbles by a couple of pixels. */
+:root{--pet-size:clamp(120px, min(62%, 210px), 210px)}
+/* Transitioned: the stage gives up room when alert bubbles appear, so the pet
+   resizes with them instead of snapping. */
 #pet{position:relative;width:var(--pet-size);height:var(--pet-size);object-fit:contain;cursor:pointer;
+  transition:width .18s ease,height .18s ease;
   filter:drop-shadow(0 0 14px rgba(var(--ac-rgb),.22))}
 #pet.dim{opacity:.6}
 body.usage-mode #pet,body.usage-mode .panel-ring{display:none}
@@ -251,11 +258,14 @@ body.usage-mode #pet,body.usage-mode .panel-ring{display:none}
 /* ============ ALERT BUBBLES ============ */
 /* Chat-app cards, stacked upward from just above the footer. Colours come from the
    active theme: --warn for a heads-up, --crit for something that needs you now. */
-/* bottom is set from the nowbar's measured position — the footer and the nowbar
-   both scale with --fs, so a fixed offset would overlap at large font sizes. */
-#alertStack{position:fixed;left:9px;right:9px;bottom:80px;z-index:60;
-  display:flex;flex-direction:column;gap:5px;pointer-events:none}
-body.mode-ball #alertStack{display:none}
+/* A flex sibling of the stage, not a floating layer. It used to be position:fixed
+   above the nowbar, which meant a full stack of bubbles sat on top of the pet.
+   In the panel's column the stage simply yields the space, and the pet re-centres
+   and shrinks through its own clamp() — overlap is impossible by construction.
+   Empty, it collapses to nothing, so the layout is unchanged when there are no
+   alerts. */
+#alertStack{flex:none;display:flex;flex-direction:column;gap:5px;margin-top:5px;pointer-events:none}
+#alertStack:empty{margin-top:0}
 .alert{position:relative;pointer-events:auto;cursor:pointer;overflow:hidden;
   padding:5px 8px 7px;border:1px solid rgba(var(--warn-rgb),.5);border-left:3px solid var(--warn);
   background:linear-gradient(160deg,var(--bg1),var(--bg2));
@@ -350,6 +360,7 @@ window.__CONFIG__ = __CONFIG_PAYLOAD__;
       </div>
     </div>
   </div>
+  <div id="alertStack"></div>
   <div class="nowbar"><b>现在:</b><span id="now">—</span></div>
   <div class="footer">
     <div class="meta"><span>CLI <b id="cli">?</b></span><span>TERM <b id="term">?</b></span><span id="forcedTag"></span></div>
@@ -360,7 +371,6 @@ window.__CONFIG__ = __CONFIG_PAYLOAD__;
   </div>
 </div>
 
-<div id="alertStack"></div>
 <div id="bubbles"></div>
 <div id="toast"></div>
 
@@ -719,16 +729,7 @@ function renderAlerts(list){
   }
   renderAlertIndicators();
 }
-// Sit the stack just above the "现在" line rather than at a fixed offset: the footer
-// and that line both grow with --fs.
-function positionAlertStack(){
-  const bar = document.querySelector('.nowbar');
-  if (!bar) return;
-  const top = bar.getBoundingClientRect().top;
-  alertStack.style.bottom = Math.max(8, window.innerHeight - top + 5) + 'px';
-}
 function pushAlertBubble(a){
-  positionAlertStack();
   const el = document.createElement('div');
   el.className = 'alert' + (a.level === 'crit' ? ' crit' : '');
   el.innerHTML = '<div class="al-top"><span class="al-ico"></span>' +
