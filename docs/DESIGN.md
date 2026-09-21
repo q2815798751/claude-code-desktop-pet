@@ -116,12 +116,40 @@ hooks 没装时架构自动退回第 2、3 层，功能不减，只是精度下�
 
 **不显示金额**：不内置任何价目表。模型名与单价因代理 / 第三方网关而异，猜一个数字不如不给。
 
+## 多会话与读开销
+
+会话 = `~/.claude/projects/<proj>/<sessionId>.jsonl`。`snapshotAll()` 筛出 `maxAgeMs` 内写过的文件，
+每个读一段尾部（`SESSION_TAIL_BYTES` = 64KB，比单会话的 256KB 小：一个会话只需要最新一行加标题，
+而 `ai-title` 每回合都会重写，永远在尾部）。解析结果按 `(path, mtime, size)` 缓存在 `sessionCache`，
+**只有变化的文件才重新解析**，落在窗口外的会被逐出。
+
+**每 tick 只走一次目录**：`server.js` 调一次 `transcript.listTranscripts()`，把结果同时交给
+`snapshot()`（单会话，决定大状态）和 `snapshotAll()`（多会话列表），两者都接受 `files` 参数。
+
+实测（本机 47 个转录，fs 1.35）：
+
+| | |
+|---|---|
+| `listTranscripts()` | 0.891ms（每 tick 的固定成本，readdir + 47 次 stat） |
+| `snapshot()`（命中缓存） | 0.010ms |
+| `snapshotAll()`（命中缓存） | 0.020ms |
+| 冷解析一次 `snapshotAll` | 0.58ms（仅在文件变化时） |
+| **每 tick 读开销合计** | **≈0.92ms / 500ms = 0.18%** |
+
+**进程探活是唯一昂贵的东西**，且代价全在 PowerShell 进程启动（~150ms）而不在查询本身：
+服务端过滤 CIM（224ms）和 `Get-Process`（151ms）都比现有查询快不了多少，所以**频率才是杠杆**。
+`probeInterval()` 在安静超过 `PROBE_BACKOFF_AFTER_MS`（2 分钟）后退避到 60s 一次；有活动时探活整个跳过。
+
+有一条是**实测推翻的假设**：把终端存活检查和进程计数合并进同一次 PowerShell 更慢
+（269ms vs 237ms）。原因是两者原本靠 `Promise.all` **并行**，墙钟取 max；
+串行进同一个进程后变成相加。所以现在仍是两个并行 spawn——只是顺便把计数带回来了。
+
 ## 文件职责
 
 | 文件 | 职责 |
 |---|---|
 | `app/state.js` | 纯状态机（`reduce` / `computeAlive` / `STATES`）— 无 IO，可直接单测 |
-| `app/transcript.js` | 转录快照：一次目录扫描 + 一次尾部读，按 (path,size,mtime) 缓存解析结果 |
+| `app/transcript.js` | 转录快照：一次目录扫描 + 一次尾部读，按 (path,size,mtime) 缓存解析结果；`snapshotAll()` 提供多会话 |
 | `app/usage.js` | token 账本：增量扫描 + 按 `message.id` 去重 + 聚合桶；落盘 `usage.json` |
 | `app/alerts.js` | 告警规则（纯函数）：边沿触发 + 冷却 + 配置 clamp |
 | `app/util.js` | `safeJson`：SSR 注入用的转义（`<` / U+2028 / U+2029） |

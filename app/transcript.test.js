@@ -135,3 +135,99 @@ test('snapshot: caching does not go stale across a second call', () => {
   assert.deepEqual(a.msg, b.msg);
   assert.equal(a.path, b.path);
 });
+
+// ---- multi-session ----
+
+const metaLine = (o) => JSON.stringify(o);
+const aiTitle = (title) => ({ type: 'ai-title', aiTitle: title, sessionId: 's' });
+const withMeta = (ms, kind, extra) => Object.assign(
+  { type: kind, timestamp: iso(ms), sessionId: 's', cwd: 'C:\\work\\proj-a', gitBranch: 'main', message: { role: 'user', content: [{ type: 'text', text: 'hi' }] } },
+  extra || {});
+
+function tmpProjectNamed(name) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pet-m-'));
+  const proj = path.join(root, 'proj');
+  fs.mkdirSync(proj);
+  return { root, file: path.join(proj, name + '.jsonl') };
+}
+
+test('snapshotAll: a transcript newer than maxAge is a session', () => {
+  const { root, file } = tmpProjectNamed('sess-1');
+  write(file, [metaLine(aiTitle('桌宠面板优化')), metaLine(withMeta(T0, 'user'))]);
+  const out = T.snapshotAll({ dir: root, now: T0 + 1000, force: true });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].id, 'sess-1');
+  assert.equal(out[0].title, '桌宠面板优化');
+  assert.equal(out[0].project, 'proj-a');
+  assert.equal(out[0].branch, 'main');
+  assert.equal(out[0].msg.kind, 'working');
+});
+
+// The id must be the FILENAME. A transcript also carries a snake_case session_id
+// that is a different value, and the hook side can only be matched by file path.
+test('snapshotAll: the id is the filename, never the snake_case session_id', () => {
+  const { root, file } = tmpProjectNamed('abc-123');
+  write(file, [metaLine({ type: 'user', timestamp: iso(T0), session_id: 'SOMETHING-ELSE', message: { role: 'user', content: [] } })]);
+  const out = T.snapshotAll({ dir: root, now: T0 + 10, force: true });
+  assert.equal(out[0].id, 'abc-123');
+});
+
+// Liveness is judged from the FILE's mtime, not from the timestamp inside the last
+// line: a session whose process died mid-turn still has a "current" line in it.
+test('snapshotAll: a stale transcript is not a session', () => {
+  const { root, file } = tmpProjectNamed('old');
+  write(file, [metaLine(withMeta(T0, 'user'))]);
+  fs.utimesSync(file, new Date(T0), new Date(T0));
+  const out = T.snapshotAll({ dir: root, now: T0 + T.SESSION_MAX_AGE_MS + 1000, force: true });
+  assert.deepEqual(out, []);
+});
+
+test('snapshotAll: newest first, and capped by limit', () => {
+  const { root, file } = tmpProjectNamed('a');
+  const dir = path.dirname(file);
+  for (let i = 0; i < 6; i++) {
+    fs.writeFileSync(path.join(dir, 's' + i + '.jsonl'), JSON.stringify(withMeta(T0 + i * 1000, 'user')) + '\n');
+    fs.utimesSync(path.join(dir, 's' + i + '.jsonl'), new Date(T0 + i * 1000), new Date(T0 + i * 1000));
+  }
+  const out = T.snapshotAll({ dir: root, now: T0 + 10000, limit: 3, force: true });
+  assert.equal(out.length, 3);
+  assert.deepEqual(out.map((s) => s.id), ['s5', 's4', 's3']);
+});
+
+test('snapshotAll: an unchanged file is not re-read', () => {
+  const { root, file } = tmpProjectNamed('cached');
+  write(file, [metaLine(withMeta(T0, 'user'))]);
+  const a = T.snapshotAll({ dir: root, now: T0 + 10 });
+  const b = T.snapshotAll({ dir: root, now: T0 + 20 });
+  assert.equal(a[0].msg, b[0].msg, 'same parsed object served from cache');
+  assert.equal(a[0].title, b[0].title);
+});
+
+test('snapshotAll: an appended file is re-read', () => {
+  const { root, file } = tmpProjectNamed('grow');
+  write(file, [metaLine(withMeta(T0, 'user'))]);
+  assert.equal(T.snapshotAll({ dir: root, now: T0 + 10 })[0].tool, '');
+  fs.appendFileSync(file, JSON.stringify(assistantTool(T0 + 500, 'Grep')) + '\n');
+  const b = T.snapshotAll({ dir: root, now: T0 + 600 });
+  assert.equal(b[0].tool, 'Grep');
+});
+
+test('snapshotAll: a session that fell out of the window is evicted from the cache', () => {
+  const { root, file } = tmpProjectNamed('evict');
+  write(file, [metaLine(withMeta(T0, 'user'))]);
+  fs.utimesSync(file, new Date(T0), new Date(T0));
+  T.snapshotAll({ dir: root, now: T0 + 10 });
+  const before = T.sessionCacheSize();
+  assert.equal(before, 1, 'cached while in the window');
+  T.snapshotAll({ dir: root, now: T0 + T.SESSION_MAX_AGE_MS + 1000 });
+  assert.equal(T.sessionCacheSize(), 0, 'evicted once out of the window');
+});
+
+test('snapshotAll: a caller-supplied file list skips its own directory walk', () => {
+  const { root, file } = tmpProjectNamed('shared');
+  write(file, [metaLine(withMeta(T0, 'user'))]);
+  const files = T.listTranscripts(root);
+  assert.equal(files.length, 1);
+  const out = T.snapshotAll({ dir: root, now: T0 + 10, files, force: true });
+  assert.equal(out[0].id, 'shared');
+});

@@ -47,13 +47,27 @@ docs/                  INSTALL / CONFIG / DESIGN / HOST
     首次全量（36MB ≈ 200ms）用 `setImmediate` 切片，否则会卡住 tick 与首屏。
 11. **告警必须边沿触发**——见 CHANGELOG 里 v2.0.0 那条"每 500ms 响一次"的教训：条件持续成立时只能报一次，
     回落才重新武装，另有冷却兜底。另外**首次建账那一帧不能评估速率类规则**（账本从 0 跳到全量语料 = 假暴涨）。
+12. **会话 id 是转录的【文件名】**，不是行里的 `session_id`。转录里 `sessionId`（驼峰）== 文件名，
+    而 `session_id`（下划线）是**另一个值**。hook 载荷里也没有 PID，所以进程 ↔ 会话无法对应——
+    **不要写那种看起来能对应、实际永远匹配不上的代码**；用 hook 的 `transcript_path` 反推文件名才可靠。
+13. **带倒计时的元素不能每帧重建**。球上告警胶囊挂在每一帧 SSE 上，只在 `id:firedAt` 变化时才重建 DOM；
+    否则动画被无限重启，进度条永远走不完。列表类同理：签名里**不要包含每秒都在变的东西**（如 ageMs），
+    变化的部分单独原地更新文本。
+14. **加了新的面板区块，必须重新做高度预算**。面板固定 320×480，fs 最大 1.35 时：
+    header 20 + statebox 39 + ubar 22 + nowbar 22 + footer 48 + 各级 margin ≈ 179，
+    剩下约 285 给「桌宠区 + 告警区 + 会话区」。告警卡 48px/张、会话行 24px/行
+    （上限：告警 2 张、会话 2 行 + 一行「还有 N 个」）。**改上限前先算这笔账**，
+    超出的表现是 footer 被切掉（`.stage` 的 `min-height` 撑着不肯缩，只能往外挤）。
 
 ## 关键文件入口
 - 状态机与阈值：`app/state.js` 的 `DEFAULTS` 与 `reduce()`（优先级：shuttingDown → forced → error → !alive → 活动）。
 - 存活判定：`app/state.js` 的 `computeAlive()`；探活频率与"有活动就跳过"在 `app/server.js` 的 `shouldProbe()`。
 - 信号仲裁：`app/server.js` 的 `currentActivity()`（hooks 优先，转录兜底）。
 - 转录解析：`app/transcript.js` 的 `parseTail()` / `classify()` / `errorOf()`。
-- 进程检测：`app/server.js` 的 `probeClaude()`（claude.exe 或 node 跑 claude CLI，排除自身）。
+- 进程检测：`app/server.js` 的 `probe()`（claude.exe 或 node 跑 claude CLI，排除自身；
+  一次 PowerShell 同时返回进程数与终端是否存活）。
+- 多会话：`app/transcript.js` 的 `snapshotAll()`（每个近期写过的转录 = 一个会话），
+  `app/server.js` 的 `buildSessions()` 负责状态归类与空闲过滤。
 - 工具中文名：`app/server.js` 的 `TOOL_LABELS` 与 `app/pet.html` 的 `TOOL_CN`（**两处要一致**）。
 - 用量账本：`app/usage.js` 的 `createScanner()` / `scanOne()` / `snapshot()`；去重与水位线都在 `ingest()`。
 - 告警规则：`app/alerts.js` 的 `RULES` / `reduce()`（边沿 + 冷却）/ `sanitize()`（配置白名单与 clamp）。

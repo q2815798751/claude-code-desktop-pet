@@ -12,8 +12,8 @@
 [Setup]
 AppId={{A6B27F1C-3E2D-4D9B-9A0E-5F1C2B7E8D4A}
 AppName=ClaudePet
-AppVersion=2.1.4
-AppVerName=ClaudePet 2.1.4
+AppVersion=2.1.5
+AppVerName=ClaudePet 2.1.5
 AppPublisher=sechenwag
 AppPublisherURL=https://github.com/q2815798751/claude-code-desktop-pet
 AppSupportURL=https://github.com/q2815798751/claude-code-desktop-pet

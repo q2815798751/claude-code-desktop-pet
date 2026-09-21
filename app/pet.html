@@ -10,7 +10,7 @@
    never looks pasted on from another design. */
 :root,
 html[data-theme="cyber"]{
-  --bg1:#04060d; --bg2:#0a0f1c; --bg-body:transparent;
+  --bg1:#04060d; --bg1-rgb:4,6,13; --bg2:#0a0f1c; --bg-body:transparent;
   --txt:#b9dcff; --dim:#8fa6c4;
   --ac:#00f0ff;  --ac-rgb:0,240,255;
   --ac2:#ff00e5; --ac2-rgb:255,0,229;
@@ -19,7 +19,7 @@ html[data-theme="cyber"]{
   --scan:255,255,255;
 }
 html[data-theme="paper"]{
-  --bg1:#fafaf7; --bg2:#efefe9; --bg-body:transparent;
+  --bg1:#fafaf7; --bg1-rgb:250,250,247; --bg2:#efefe9; --bg-body:transparent;
   --txt:#11110f; --dim:#5c5c58;
   --ac:#4a4a48;  --ac-rgb:74,74,72;
   --ac2:#b8894a; --ac2-rgb:184,137,74;
@@ -30,7 +30,7 @@ html[data-theme="paper"]{
   --scan:0,0,0;
 }
 html[data-theme="matrix"]{
-  --bg1:#001100; --bg2:#001b00; --bg-body:transparent;
+  --bg1:#001100; --bg1-rgb:0,17,0; --bg2:#001b00; --bg-body:transparent;
   --txt:#a0efac; --dim:#6fc47f;
   --ac:#00ff41;  --ac-rgb:0,255,65;
   --ac2:#00c42e; --ac2-rgb:0,196,46;
@@ -39,7 +39,7 @@ html[data-theme="matrix"]{
   --scan:0,255,65;
 }
 html[data-theme="gold"]{
-  --bg1:#000000; --bg2:#0e0b06; --bg-body:transparent;
+  --bg1:#000000; --bg1-rgb:0,0,0; --bg2:#0e0b06; --bg-body:transparent;
   --txt:#eadbb2; --dim:#b3a17c;
   --ac:#ffd166;  --ac-rgb:255,209,102;
   --ac2:#b58a2f; --ac2-rgb:181,138,47;
@@ -48,7 +48,7 @@ html[data-theme="gold"]{
   --scan:255,209,102;
 }
 html[data-theme="sunset"]{            /* 落日橙 */
-  --bg1:#1c0b2b; --bg2:#33102f; --bg-body:transparent;
+  --bg1:#1c0b2b; --bg1-rgb:28,11,43; --bg2:#33102f; --bg-body:transparent;
   --txt:#ffe7d2; --dim:#c9a3b0;
   --ac:#ff6b35;  --ac-rgb:255,107,53;
   --ac2:#ff2e88; --ac2-rgb:255,46,136;
@@ -57,7 +57,7 @@ html[data-theme="sunset"]{            /* 落日橙 */
   --scan:255,107,53;
 }
 html[data-theme="ocean"]{             /* 深海蓝 */
-  --bg1:#00121c; --bg2:#00293a; --bg-body:transparent;
+  --bg1:#00121c; --bg1-rgb:0,18,28; --bg2:#00293a; --bg-body:transparent;
   --txt:#c4f2ff; --dim:#8fbccb;
   --ac:#00e5ff;  --ac-rgb:0,229,255;
   --ac2:#00ffb3; --ac2-rgb:0,255,179;
@@ -101,25 +101,33 @@ html,body{width:100%;height:100%;overflow:hidden;background:transparent;   /* tr
   box-shadow:0 0 10px var(--crit);animation:blink 1.6s steps(1) infinite}
 .ball-badge[hidden]{display:none}
 .ball-badge:hover{filter:brightness(1.35)}
-/* A solid card, the same visual language as the panel bubbles, rather than bare
-   glyphs over the GIF. The text sits on the ring and the animated pet, so red-on-
-   red with a three-layer glow washed out completely at 10px; a themed plate plus
-   a real font size is what makes it readable. Amber for a warn, red for a crit —
-   it used to be --crit unconditionally, so a heavy-usage day shouted in alarm red.
-   z-index keeps it above the ring, which it deliberately overlaps. */
-.ball-alert{position:absolute;left:4px;right:4px;bottom:3px;z-index:3;padding:3px 6px 4px;
-  text-align:center;pointer-events:none;
+/* A translucent pill, not an opaque card. The card was readable but it read as a
+   foreign panel pasted over the ball, hiding the pet and fighting the theme. This
+   keeps the ball's own look: a light scrim (the theme's own bg1 at low alpha) just
+   enough to hold the text off the GIF's busy pixels, a hairline border the width of
+   the accent, and no blur or glow. It dismisses itself after BALL_ALERT_MS with a
+   bar that drains the whole time, so the ball always returns to its clean state.
+   z-index keeps it above the ring, which it deliberately overlaps.
+   pointer-events:none so it never steals a drag. */
+.ball-alert{position:absolute;left:4px;right:4px;bottom:3px;z-index:3;
+  padding:3px 7px 5px;text-align:center;pointer-events:none;
   font-size:calc(9px * var(--fs));line-height:1.2;font-weight:600;
   color:var(--warn);overflow-wrap:anywhere;overflow:hidden;
-  background:linear-gradient(160deg,var(--bg1),var(--bg2));
-  border:1px solid rgba(var(--warn-rgb),.55);border-left:3px solid var(--warn);
-  box-shadow:0 0 10px rgba(var(--warn-rgb),.28);
-  max-height:calc(3 * 1.2 * 9px * var(--fs) + 9px)}
-.ball-alert.crit{color:var(--crit);border-color:rgba(var(--crit-rgb),.6);
-  border-left-color:var(--crit);box-shadow:0 0 10px rgba(var(--crit-rgb),.33)}
+  background:rgba(var(--bg1-rgb),.42);
+  border:1px solid rgba(var(--warn-rgb),.45);
+  border-radius:4px;
+  text-shadow:0 0 3px var(--bg1),0 0 2px var(--bg1);
+  max-height:calc(3 * 1.2 * 9px * var(--fs) + 10px)}
+.ball-alert.crit{color:var(--crit);border-color:rgba(var(--crit-rgb),.5)}
 .ball-alert[hidden]{display:none}
 .ball-alert b{display:block;letter-spacing:1px}
 .ball-alert span{display:block;font-weight:400;color:var(--txt)}
+/* The countdown. Width, not a transform, so it is trivially correct at any length;
+   `forwards` holds it empty after the run. */
+.ball-alert .bdrain{position:absolute;left:0;bottom:0;height:2px;width:100%;
+  background:var(--warn);animation:bdrain linear forwards}
+.ball-alert.crit .bdrain{background:var(--crit)}
+@keyframes bdrain{from{width:100%}to{width:0}}
 
 /* bubble menu */
 #bubbles{position:fixed;inset:0;pointer-events:none;z-index:50}
@@ -272,6 +280,21 @@ body.usage-mode #pet,body.usage-mode .panel-ring{display:none}
 .uv-toggle:hover{background:rgba(var(--ac-rgb),.18)}
 .uv-toggle.on{color:var(--bg1);background:var(--st);border-color:var(--st)}
 
+/* ---- concurrent sessions ---- */
+/* Only rendered with two or more sessions: a single row would just restate the
+   status line above it. Sits in the same column as the alert stack, below it, so
+   warnings keep priority and the pet yields the space to both. */
+#sessionList{flex:none;display:flex;flex-direction:column;gap:3px;margin-top:5px}
+#sessionList:empty{margin-top:0}
+.srow{display:flex;align-items:center;gap:5px;padding:2px 6px;
+  font-size:calc(8px*var(--fs));line-height:1.3;font-weight:600;
+  border:1px solid rgba(var(--ac-rgb),.16);background:rgba(var(--ac-rgb),.04);
+  white-space:nowrap;overflow:hidden}
+.srow .sdot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--dim)}
+.srow .stitle{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--txt)}
+.srow .smeta{flex:none;color:var(--dim);font-weight:400}
+.srow.more{justify-content:center;color:var(--dim);font-weight:400}
+
 .nowbar{flex:none;display:flex;gap:6px;margin-top:4px;font-size:calc(9px*var(--fs));font-weight:600;color:var(--dim);
   border:1px solid rgba(var(--ac-rgb),.18);background:rgba(var(--ac-rgb),.04);padding:2px 6px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -401,6 +424,7 @@ window.__CONFIG__ = __CONFIG_PAYLOAD__;
     </div>
   </div>
   <div id="alertStack"></div>
+  <div id="sessionList"></div>
   <div class="nowbar"><b>现在:</b><span id="now">—</span></div>
   <div class="footer">
     <div class="meta"><span>CLI <b id="cli">?</b></span><span>TERM <b id="term">?</b></span><span id="forcedTag"></span></div>
@@ -458,6 +482,7 @@ const toast = document.getElementById('toast');
 const nowEl = document.getElementById('now');
 const alertBadge = document.getElementById('alertBadge');
 const alertStack = document.getElementById('alertStack');
+const sessionList = document.getElementById('sessionList');
 const usageBar = document.getElementById('usageBar');
 const uIn = document.getElementById('uIn');
 const uOut = document.getElementById('uOut');
@@ -612,6 +637,9 @@ function applyTheme(t){
   document.documentElement.setAttribute('data-theme', t);
   titleTxt.title = 'CLAUDE.PET // ' + (THEME_NAMES[t] || 'CYBER');
   if (lastState) applyState(lastState);
+  // Session dots are painted from the theme palette, so force a rebuild.
+  sessionSig = '';
+  if (lastState) renderSessions(lastState.sessions);
   persistConfig();
 }
 function cycleTheme(){ applyTheme(THEMES[(THEMES.indexOf(theme)+1) % THEMES.length]); toastMsg('THEME ' + THEME_NAMES[theme]); }
@@ -716,6 +744,21 @@ const activeAlerts = () => ((lastState && lastState.alerts) || []).filter((a) =>
 const isAcked = (a) => ackAlerts.get(a.id) === a.firedAt;
 const unreadAlerts = () => activeAlerts().filter((a) => !isAcked(a));
 
+// The ball pill is thrown away after this long whether or not it was acknowledged.
+// The badge keeps the unread count, so nothing is lost — the ball just goes back to
+// being a ball.
+const BALL_ALERT_MS = 10000;
+const BALL_ALERT_DISMISSED_MAX = 8;
+let ballAlertKey = '';                 // "id:firedAt" currently on screen
+let ballAlertTimer = null;
+const ballAlertDismissed = new Set();  // keys whose 10s window has already elapsed
+
+function hideBallAlert(){
+  ballAlert.hidden = true;
+  ballAlert.textContent = '';
+  ballAlertKey = '';
+}
+
 function renderAlertIndicators(){
   const unread = unreadAlerts();
   const n = unread.length;
@@ -728,18 +771,105 @@ function renderAlertIndicators(){
 
   // The ball strip follows the unread set too: acknowledging is the user saying
   // "seen it", so it goes quiet even though the condition is still standing.
-  ballAlert.textContent = '';
-  ballAlert.hidden = n === 0;
-  if (!n) return;
   const a = unread[0];
-  ballAlert.classList.toggle('crit', a.level === 'crit');
+  if (!n || !a) { if (ballAlertKey) hideBallAlert(); return; }
+
+  const key = a.id + ':' + a.firedAt;
+  // Rebuilding on every frame would restart the drain animation forever, so the
+  // DOM is only touched when the alert actually changes. This runs on every SSE
+  // frame — the key check is what makes the countdown mean anything.
+  if (key === ballAlertKey) return;
+  if (ballAlertDismissed.has(key)) { if (ballAlertKey) hideBallAlert(); return; }
+
+  ballAlertKey = key;
+  ballAlert.hidden = false;
+  ballAlert.className = 'ball-alert' + (a.level === 'crit' ? ' crit' : '');
   ballAlert.title = a.title + ' — ' + a.detail;
+  ballAlert.textContent = '';
   const b = document.createElement('b');
   b.textContent = a.title;
   const s = document.createElement('span');
   s.textContent = a.detail;
+  const drain = document.createElement('i');
+  drain.className = 'bdrain';
+  drain.style.animationDuration = (BALL_ALERT_MS / 1000) + 's';
   ballAlert.appendChild(b);
   ballAlert.appendChild(s);
+  ballAlert.appendChild(drain);
+
+  clearTimeout(ballAlertTimer);
+  ballAlertTimer = setTimeout(() => {
+    ballAlertDismissed.add(key);
+    while (ballAlertDismissed.size > BALL_ALERT_DISMISSED_MAX) {
+      ballAlertDismissed.delete(ballAlertDismissed.values().next().value);
+    }
+    if (ballAlertKey === key) hideBallAlert();
+  }, BALL_ALERT_MS);
+}
+
+// ---- concurrent sessions ----
+// Rows are rebuilt only when a session's identity or state changes; the age text is
+// patched in place afterwards, because an age that ticks every second must not
+// count as a change (it would rebuild the list once a second forever).
+const SESSION_MAX_ROWS = 2;
+let sessionSig = '';
+
+function fmtAge(ms){
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.round(s / 60);
+  return m < 60 ? m + 'm' : Math.round(m / 60) + 'h';
+}
+function sessionAgeText(s){
+  const tool = (s.state === 'working' && s.tool) ? (TOOL_CN[s.tool] || s.tool) : '';
+  const st = tool || CN[s.state] || s.state;
+  return st + ' · ' + fmtAge(s.ageMs);
+}
+
+function renderSessions(list){
+  const arr = (list || []).slice(0, SESSION_MAX_ROWS);
+  const extra = (list || []).length - arr.length;
+  // A single session is already the headline state above; the list only earns its
+  // space when there is something to compare.
+  if ((list || []).length < 2) {
+    if (sessionSig !== '') { sessionSig = ''; sessionList.innerHTML = ''; }
+    return;
+  }
+  const sig = arr.map((s) => s.id + '|' + s.state + '|' + s.tool + '|' + s.title).join('~') + '#' + extra;
+  if (sig === sessionSig) {
+    // same shape: only the ages moved
+    const rows = sessionList.querySelectorAll('.srow');
+    arr.forEach((s, i) => {
+      const meta = rows[i] && rows[i].querySelector('.smeta');
+      if (meta) meta.textContent = sessionAgeText(s);
+    });
+    return;
+  }
+  sessionSig = sig;
+  sessionList.textContent = '';
+  const pal = STATE_COLORS[theme] || STATE_COLORS.cyber;
+  arr.forEach((s) => {
+    const row = document.createElement('div');
+    row.className = 'srow';
+    const dot = document.createElement('i');
+    dot.className = 'sdot';
+    dot.style.background = pal[s.state] || pal.idle;
+    const title = document.createElement('span');
+    title.className = 'stitle';
+    title.textContent = s.title;
+    title.title = (s.project || '') + (s.branch ? ' · ' + s.branch : '') + (s.hooked ? ' · hooks' : '');
+    const meta = document.createElement('span');
+    meta.className = 'smeta';
+    meta.textContent = sessionAgeText(s);
+    row.appendChild(dot); row.appendChild(title); row.appendChild(meta);
+    sessionList.appendChild(row);
+  });
+  if (extra > 0) {
+    const more = document.createElement('div');
+    more.className = 'srow more';
+    more.textContent = '还有 ' + extra + ' 个会话';
+    sessionList.appendChild(more);
+  }
 }
 
 function ackAlert(a){
@@ -823,6 +953,7 @@ function render(json){
   if (json.lastAction) nowEl.textContent = json.lastAction;
   renderUsage(json.usage);
   renderAlerts(json.alerts);
+  renderSessions(json.sessions);
   if (usageOpen) renderUsageView(json.usage);
   firstFrame = false;
 }

@@ -38,7 +38,15 @@ const ORIGINS = [`${HOST}:${PORT}`, `localhost:${PORT}`];
 const DONE_HOLD_MS = 5000;     // done state holds 5s
 const SHUTDOWN_HOLD_MS = 2500; // self-exit within 5s of terminal death
 const WINDOW_STALE_MS = 5000;  // pet window considered alive if seen within 5s
+// The probe is the single most expensive thing the pet does: one PowerShell
+// process (~150ms just to start) plus a CIM enumeration. Measured 230-250ms per
+// call. It only ever has to answer "is an idle session still there?", so it backs
+// off hard once nothing is happening — and any hook event or transcript write
+// skips it entirely (shouldProbe). Server-side filter and Get-Process were both
+// tried; the query is not the cost, the process spawn is, so frequency is the lever.
 const PROBE_INTERVAL_MS = 8000;// re-run the process probe at most every 8s
+const PROBE_IDLE_INTERVAL_MS = 60000; // ...backing off to this once quiet
+const PROBE_BACKOFF_AFTER_MS = 120000; // "quiet" = nothing for this long
 const HEARTBEAT_MS = 15000;    // SSE keep-alive
 // Usage scanning is deliberately NOT part of the 500ms tick. Steady state it is one
 // readdir plus a stat per transcript (well under a millisecond); the first pass
@@ -80,7 +88,12 @@ let windowSeenAt = 0;
 
 // process probe
 let procAlive = null;          // null = not probed yet
+let procCount = 0;             // how many claude processes the probe last saw
 let lastProbeAt = 0;
+
+// concurrent sessions (one per recently-written transcript), newest first
+let sessions = [];
+const SESSION_SHOW_MS = 45000; // a session idle longer than this is not "current"
 
 // hook sessions
 const hookSessions = new Map(); // session_id -> lastAt
@@ -187,16 +200,27 @@ function run(cmd) {
   });
 }
 
+// claude.exe (native / WinGet) OR node.exe running the Claude Code CLI (npm
+// install), excluding our own server (its command line contains 'server.js', and
+// an install path like ...\ClaudePet\app\server.js would otherwise self-match).
+//
+// Returns the COUNT, not a boolean: the panel shows it, so a session the pet is
+// not tracking shows up as a count mismatch instead of staying invisible. The
+// count is free — the enumeration already had the objects.
+//
+// Measured, and it corrected an assumption: folding the terminal check into this
+// same PowerShell made the probe SLOWER (269ms vs 237ms). The two used to run in
+// parallel via Promise.all, so wall time was max(a,b) and the second spawn was
+// hidden; serialising them inside one process turned that into a sum. Keeping them
+// as parallel spawns is the faster shape, so that is what this does.
 function probeClaude() {
-  // claude.exe (native / WinGet) OR node.exe running the Claude Code CLI (npm install).
-  // Exclude our own server process (command line contains 'server.js') so an install
-  // under a path like ...\ClaudePet\app\server.js is never a false positive.
   return new Promise((resolve) => {
     execFile('powershell.exe', [
       '-NoProfile', '-WindowStyle', 'Hidden', '-Command',
-      "$m = Get-CimInstance Win32_Process | Where-Object { ( $_.Name -eq 'claude.exe' ) -or ( $_.Name -eq 'node.exe' -and $_.CommandLine -match 'claude-code|@anthropic-ai|cli\\.js' -and $_.CommandLine -notmatch 'server\\.js' ) }; if ( $m ) { '1' } else { '0' }"
+      "$m = @(Get-CimInstance Win32_Process | Where-Object { ( $_.Name -eq 'claude.exe' ) -or ( $_.Name -eq 'node.exe' -and $_.CommandLine -match 'claude-code|@anthropic-ai|cli\\.js' -and $_.CommandLine -notmatch 'server\\.js' ) }); $m.Count"
     ], { windowsHide: true, timeout: 5000 }, (err, out) => {
-      resolve(!err && /1/.test((out || '').trim()));
+      const n = parseInt(String(out || '').trim(), 10);
+      resolve({ ok: !err, count: Number.isFinite(n) ? n : 0 });
     });
   });
 }
@@ -209,10 +233,16 @@ function pidAliveCheck(pid) {
 // A transcript write within the freshness window proves claude is running, so the
 // probe is skipped entirely while claude is actually working. That is when the
 // probe would have been pure waste — and it is the common case.
+function probeInterval(now) {
+  const quietSince = Math.max(lastHookAt, lastActivity);
+  if (quietSince && now - quietSince > PROBE_BACKOFF_AFTER_MS) return PROBE_IDLE_INTERVAL_MS;
+  return PROBE_INTERVAL_MS;
+}
+
 function shouldProbe(now) {
   if (lastHookAt && now - lastHookAt < CFG.ACTIVITY_FRESH_MS) return false;
   if (lastActivity && now - lastActivity < CFG.ACTIVITY_FRESH_MS) return false;
-  return now - lastProbeAt > PROBE_INTERVAL_MS;
+  return now - lastProbeAt > probeInterval(now);
 }
 
 async function updateProcesses(now) {
@@ -224,7 +254,8 @@ async function updateProcesses(now) {
     const tasks = [probeClaude()];
     if (termPid) tasks.push(pidAliveCheck(termPid));
     const [c, t] = await Promise.all(tasks);
-    procAlive = !!c;
+    procAlive = c.count > 0;
+    procCount = c.count;
     if (termPid) termAlive = !!t;
   }
 }
@@ -238,7 +269,12 @@ function pruneSessions(now) {
 
 function onHookEvent(body, now) {
   const name = String(body.hook_event_name || '');
-  const sid = String(body.session_id || '');
+  // Correlate on transcript_path, not session_id. The transcript file is named
+  // <sessionId>.jsonl and that camelCase id is what identifies a conversation; the
+  // snake_case `session_id` that also appears inside a transcript line is a
+  // different value entirely, and matching sessions by it would silently never hit.
+  const tp = String(body.transcript_path || '');
+  const sid = tp ? path.basename(tp, '.jsonl') : String(body.session_id || '');
   hookEnabled = true;
   lastHookAt = now;
 
@@ -282,6 +318,47 @@ function currentActivity(snap, now) {
     }
   }
   return fromTranscript;
+}
+
+// ---- concurrent sessions ----
+// A session per recently-written transcript. State is derived per session with the
+// same rules the headline state uses, so a row here and the big status line never
+// disagree about what "working" means.
+//
+// Liveness comes from the transcript, not from process correlation: a claude
+// process carries no session id and the hook payload has no pid, so mapping
+// processes to conversations would be a guess dressed up as a fact. The process
+// count is exposed separately so a mismatch is visible rather than hidden.
+function sessionState(s, now) {
+  if (s.error) return 'error';
+  if (!s.msg) return 'idle';
+  const kind = s.msg.kind;
+  if (kind === 'working') return 'working';
+  if (kind === 'done') return 'done';
+  if (kind === 'awaiting') return 'awaiting';
+  return 'idle';
+}
+
+function buildSessions(list, now) {
+  const out = [];
+  for (const s of list) {
+    const ageMs = Math.max(0, now - s.mtime);
+    const hooked = hookSessions.has(s.id);
+    // Not shown as "current" once it has gone quiet — that is what makes the list
+    // track terminals opening and closing rather than growing forever.
+    if (ageMs > SESSION_SHOW_MS && !hooked) continue;
+    out.push({
+      id: s.id,
+      title: s.title || s.slug || s.project || s.id.slice(0, 8),
+      project: s.project,
+      branch: s.branch && s.branch !== 'HEAD' ? s.branch : '',
+      state: sessionState(s, now),
+      tool: s.tool || '',
+      ageMs,
+      hooked,
+    });
+  }
+  return out;
 }
 
 // ---- poll loop ----
@@ -330,8 +407,11 @@ async function tick() {
 
   pruneSessions(now);
 
-  const snap = transcript.snapshot({ now });
+  // One walk of the projects tree per tick, shared by both readers.
+  const files = transcript.listTranscripts(PROJECTS_DIR);
+  const snap = transcript.snapshot({ now, files });
   if (snap.path) activeSession = path.basename(snap.path, '.jsonl');
+  sessions = buildSessions(transcript.snapshotAll({ now, files }), now);
   const activity = currentActivity(snap, now);
   const actTs = Math.max(snap.mtime, lastHookAt, snap.msg ? snap.msg.ts : 0);
   if (actTs) lastActivity = actTs;
@@ -391,6 +471,8 @@ function stateJson() {
     runtime: { node: runtime.NODE || null, claude: runtime.CLAUDE || null },
     usage: lastUsage,
     alerts: currentAlerts,
+    sessions,
+    procs: procCount,
     ts: now,
   };
 }
@@ -402,8 +484,11 @@ function stateSig(s) {
   const u = s.usage || {};
   const uSig = [u.ready ? 1 : 0, u.total ? u.total.msgs : 0, u.ctx ? u.ctx.tokens : 0].join(',');
   const aSig = (s.alerts || []).map((a) => a.id + ':' + a.firedAt + ':' + (a.active ? 1 : 0)).join(',');
+  // Session ids and states only — an ageMs that ticks every second must not count
+  // as a change, or the panel would re-render (and re-push) constantly.
+  const sSig = (s.sessions || []).map((x) => x.id + ':' + x.state + ':' + x.tool).join(',');
   return [s.state, s.tool, s.long, s.claude, s.hooked, s.termAlive, s.lastAction, s.error,
-    s.shutdown, s.forced, uSig, aSig].join('|');
+    s.shutdown, s.forced, uSig, aSig, sSig, s.procs].join('|');
 }
 let lastSig = '';
 
