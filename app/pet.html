@@ -23,7 +23,9 @@ html[data-theme="paper"]{
   --txt:#11110f; --dim:#5c5c58;
   --ac:#4a4a48;  --ac-rgb:74,74,72;
   --ac2:#b8894a; --ac2-rgb:184,137,74;
-  --warn:#c77800; --warn-rgb:199,120,0;
+  /* #c77800 was only 3.0:1 on this theme's near-white panel — the alert title on
+     the bubble and on the ball card both failed AA. Darkened to 5.1:1. */
+  --warn:#965500; --warn-rgb:150,85,0;
   --crit:#c0392b; --crit-rgb:192,57,43;
   --scan:0,0,0;
 }
@@ -99,18 +101,25 @@ html,body{width:100%;height:100%;overflow:hidden;background:transparent;   /* tr
   box-shadow:0 0 10px var(--crit);animation:blink 1.6s steps(1) infinite}
 .ball-badge[hidden]{display:none}
 .ball-badge:hover{filter:brightness(1.35)}
-/* The ball window is only 150x170, so one ellipsised line cannot hold an alert.
-   The block wraps instead: title on its own line, detail underneath, three lines
-   maximum. The font runs smaller than the rest of the ball HUD so two lines of
-   detail still clear the rim, and a --bg1 halo keeps it legible over the GIF. */
-.ball-alert{position:absolute;bottom:3px;left:0;right:0;padding:0 5px;text-align:center;
-  pointer-events:none;font-size:calc(7.5px * var(--fs));line-height:1.15;font-weight:600;
-  color:var(--crit);overflow-wrap:anywhere;overflow:hidden;
-  max-height:calc(3 * 1.15 * 7.5px * var(--fs));
-  text-shadow:0 0 3px var(--bg1),0 0 6px var(--bg1),0 0 10px var(--crit)}
+/* A solid card, the same visual language as the panel bubbles, rather than bare
+   glyphs over the GIF. The text sits on the ring and the animated pet, so red-on-
+   red with a three-layer glow washed out completely at 10px; a themed plate plus
+   a real font size is what makes it readable. Amber for a warn, red for a crit —
+   it used to be --crit unconditionally, so a heavy-usage day shouted in alarm red.
+   z-index keeps it above the ring, which it deliberately overlaps. */
+.ball-alert{position:absolute;left:4px;right:4px;bottom:3px;z-index:3;padding:3px 6px 4px;
+  text-align:center;pointer-events:none;
+  font-size:calc(9px * var(--fs));line-height:1.2;font-weight:600;
+  color:var(--warn);overflow-wrap:anywhere;overflow:hidden;
+  background:linear-gradient(160deg,var(--bg1),var(--bg2));
+  border:1px solid rgba(var(--warn-rgb),.55);border-left:3px solid var(--warn);
+  box-shadow:0 0 10px rgba(var(--warn-rgb),.28);
+  max-height:calc(3 * 1.2 * 9px * var(--fs) + 9px)}
+.ball-alert.crit{color:var(--crit);border-color:rgba(var(--crit-rgb),.6);
+  border-left-color:var(--crit);box-shadow:0 0 10px rgba(var(--crit-rgb),.33)}
 .ball-alert[hidden]{display:none}
 .ball-alert b{display:block;letter-spacing:1px}
-.ball-alert span{display:block;font-weight:400;opacity:.9}
+.ball-alert span{display:block;font-weight:400;color:var(--txt)}
 
 /* bubble menu */
 #bubbles{position:fixed;inset:0;pointer-events:none;z-index:50}
@@ -722,10 +731,13 @@ function renderAlertIndicators(){
   ballAlert.textContent = '';
   ballAlert.hidden = n === 0;
   if (!n) return;
+  const a = unread[0];
+  ballAlert.classList.toggle('crit', a.level === 'crit');
+  ballAlert.title = a.title + ' — ' + a.detail;
   const b = document.createElement('b');
-  b.textContent = unread[0].title;
+  b.textContent = a.title;
   const s = document.createElement('span');
-  s.textContent = unread[0].detail;
+  s.textContent = a.detail;
   ballAlert.appendChild(b);
   ballAlert.appendChild(s);
 }
