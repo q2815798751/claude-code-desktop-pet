@@ -7,7 +7,7 @@ rem  Env check runs first but does NOT block installation.
 rem ============================================================
 setlocal
 set "TARGET=%LOCALAPPDATA%\ClaudePet"
-set "VER=2.1.2"
+set "VER=2.1.3"
 
 echo ==========================================
 echo   ClaudePet v%VER% - Installer

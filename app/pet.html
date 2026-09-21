@@ -11,7 +11,7 @@
 :root,
 html[data-theme="cyber"]{
   --bg1:#04060d; --bg2:#0a0f1c; --bg-body:transparent;
-  --txt:#b9dcff; --dim:#5f7290;
+  --txt:#b9dcff; --dim:#8fa6c4;
   --ac:#00f0ff;  --ac-rgb:0,240,255;
   --ac2:#ff00e5; --ac2-rgb:255,0,229;
   --warn:#ffcc00; --warn-rgb:255,204,0;
@@ -20,7 +20,7 @@ html[data-theme="cyber"]{
 }
 html[data-theme="paper"]{
   --bg1:#fafaf7; --bg2:#efefe9; --bg-body:transparent;
-  --txt:#11110f; --dim:#8d8d86;
+  --txt:#11110f; --dim:#5c5c58;
   --ac:#4a4a48;  --ac-rgb:74,74,72;
   --ac2:#b8894a; --ac2-rgb:184,137,74;
   --warn:#c77800; --warn-rgb:199,120,0;
@@ -29,7 +29,7 @@ html[data-theme="paper"]{
 }
 html[data-theme="matrix"]{
   --bg1:#001100; --bg2:#001b00; --bg-body:transparent;
-  --txt:#a0efac; --dim:#3f8f4f;
+  --txt:#a0efac; --dim:#6fc47f;
   --ac:#00ff41;  --ac-rgb:0,255,65;
   --ac2:#00c42e; --ac2-rgb:0,196,46;
   --warn:#ffee00; --warn-rgb:255,238,0;
@@ -38,7 +38,7 @@ html[data-theme="matrix"]{
 }
 html[data-theme="gold"]{
   --bg1:#000000; --bg2:#0e0b06; --bg-body:transparent;
-  --txt:#eadbb2; --dim:#7d7056;
+  --txt:#eadbb2; --dim:#b3a17c;
   --ac:#ffd166;  --ac-rgb:255,209,102;
   --ac2:#b58a2f; --ac2-rgb:181,138,47;
   --warn:#ff9f1c; --warn-rgb:255,159,28;
@@ -47,7 +47,7 @@ html[data-theme="gold"]{
 }
 html[data-theme="sunset"]{            /* 落日橙 */
   --bg1:#1c0b2b; --bg2:#33102f; --bg-body:transparent;
-  --txt:#ffe7d2; --dim:#9a7a86;
+  --txt:#ffe7d2; --dim:#c9a3b0;
   --ac:#ff6b35;  --ac-rgb:255,107,53;
   --ac2:#ff2e88; --ac2-rgb:255,46,136;
   --warn:#ffd166; --warn-rgb:255,209,102;
@@ -56,7 +56,7 @@ html[data-theme="sunset"]{            /* 落日橙 */
 }
 html[data-theme="ocean"]{             /* 深海蓝 */
   --bg1:#00121c; --bg2:#00293a; --bg-body:transparent;
-  --txt:#c4f2ff; --dim:#5a8a9a;
+  --txt:#c4f2ff; --dim:#8fbccb;
   --ac:#00e5ff;  --ac-rgb:0,229,255;
   --ac2:#00ffb3; --ac2-rgb:0,255,179;
   --warn:#ffd166; --warn-rgb:255,209,102;
@@ -89,7 +89,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:transparent;   /* tr
   filter:drop-shadow(0 0 10px rgba(var(--ac-rgb),.35))}
 .ball-status{position:absolute;top:8px;left:0;right:0;text-align:center;pointer-events:none;
   font-size:calc(11px * var(--fs));font-weight:600;letter-spacing:2px;color:var(--st);
-  text-shadow:0 0 8px var(--st),0 0 16px var(--st)}
+  text-shadow:0 0 4px var(--st),0 0 3px var(--bg1)}
 /* The ball window is only 150x170, so an alert cannot be a bubble here — it is a
    badge on the ring plus one line in the free strip under it. A critical alert
    opens the panel instead, which is where bubbles live. */
@@ -167,9 +167,12 @@ body.mode-panel #ball{display:none}
 .alertbadge:hover{background:rgba(var(--crit-rgb),.3)}
 
 .statebox{flex:none;margin-top:4px}
-.stateline{font-size:calc(16px * var(--fs));font-weight:700;letter-spacing:3px;color:var(--st);
-  text-shadow:0 0 8px var(--st),0 0 20px var(--st);display:flex;align-items:baseline;gap:8px}
-.stateline .cn{font-size:calc(9px * var(--fs));letter-spacing:1px;color:var(--dim);font-weight:400}
+/* One weak glow, not two. The old 0 0 8px + 0 0 20px pair bled the glyph edges into
+   each other and made the state word read as a smear rather than text. */
+.stateline{font-size:calc(16px * var(--fs));font-weight:700;letter-spacing:2px;color:var(--st);
+  text-shadow:0 0 4px var(--st);display:flex;align-items:baseline;gap:8px;flex:none}
+.stateline .cn{font-size:calc(9px * var(--fs));letter-spacing:1px;color:var(--dim);font-weight:400;
+  text-shadow:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bar{flex:none;height:5px;margin-top:5px;position:relative;background:rgba(var(--scan),.08);border:1px solid rgba(var(--scan),.12)}
 .bar i{position:absolute;inset:0;width:0%;background:linear-gradient(90deg,var(--st),transparent);box-shadow:0 0 8px var(--st);transition:width .4s linear}
 .bar u{position:absolute;right:0;top:-1px;font-size:calc(8px * var(--fs));color:var(--dim)}
@@ -190,45 +193,64 @@ body.mode-panel #ball{display:none}
 .ubar.over .ufill i{background:var(--crit);box-shadow:0 0 6px var(--crit)}
 .ubar.over{border-color:rgba(var(--crit-rgb),.4)}
 
-.stage{flex:1;min-height:110px;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.panel-ring{position:absolute;width:calc(var(--pet-size)*1.08);height:calc(var(--pet-size)*1.08);border-radius:50%;
+.stage{flex:1;min-height:118px;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+/* Sized by HEIGHT only, then squared with aspect-ratio.
+   `--pet-size` used to be one clamp() applied to both width and height, and a
+   percentage resolves against each axis separately: at rest that happened to give
+   185x186, but once alert bubbles squeezed the stage to 137px the height resolved
+   to 62% of 137 = 85px (floored to 120) while the width stayed 185 — so the pet
+   box went non-square and .panel-ring drew as a 200x130 ellipse. Driving both from
+   the height keeps them identical by construction. */
+:root{--pet-h:clamp(110px, 62%, 210px)}
+.panel-ring{position:absolute;height:calc(var(--pet-h)*1.08);aspect-ratio:1/1;width:auto;border-radius:50%;
   border:1px solid rgba(var(--ac-rgb),.16);box-shadow:0 0 30px rgba(var(--ac-rgb),.10);
   animation:spin 14s linear infinite}
-/* The 120px floor only binds while a full stack of alert bubbles is squeezing the
-   stage; at rest 62% of a 300px stage wins and the pet sits at ~186px. A higher
-   floor (150px, as it was) made the pet taller than the space left, so it got
-   clipped and overlapped the bubbles by a couple of pixels. */
-:root{--pet-size:clamp(120px, min(62%, 210px), 210px)}
 /* Transitioned: the stage gives up room when alert bubbles appear, so the pet
    resizes with them instead of snapping. */
-#pet{position:relative;width:var(--pet-size);height:var(--pet-size);object-fit:contain;cursor:pointer;
-  transition:width .18s ease,height .18s ease;
+#pet{position:relative;height:var(--pet-h);aspect-ratio:1/1;width:auto;object-fit:contain;cursor:pointer;
+  transition:height .18s ease;
   filter:drop-shadow(0 0 14px rgba(var(--ac-rgb),.22))}
 #pet.dim{opacity:.6}
 body.usage-mode #pet,body.usage-mode .panel-ring{display:none}
 
 /* ---- usage page: replaces the pet in the stage ---- */
-#usageView{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;gap:6px;padding:2px 1px}
+/* This is an absolutely-positioned box that fills the stage, and it used to
+   overflow it. `justify-content:center` with content taller than the container
+   spills BOTH ways, so when alert bubbles squeezed the stage to 137px the page's
+   172px of content pushed its bottom row (the alert toggle and font buttons) down
+   to y=264 — 30px on top of the first alert bubble, i.e. the token panel covering
+   the token warnings. Now every row is fixed except the sparkline, which is the
+   only element allowed to flex, so the page always sums to exactly the stage
+   height. overflow:hidden is belt-and-braces for a font size we have not seen. */
+#usageView{position:absolute;inset:0;display:flex;flex-direction:column;gap:5px;padding:1px 0;overflow:hidden}
 #usageView[hidden]{display:none}
 .uv-tabs{display:flex;gap:3px;flex:none}
 .uv-tab{flex:1;font-family:inherit;font-size:calc(9px*var(--fs));font-weight:600;letter-spacing:1px;
   color:var(--dim);background:rgba(var(--ac-rgb),.04);border:1px solid rgba(var(--ac-rgb),.2);
-  padding:3px 0;cursor:pointer}
+  padding:2px 0;line-height:1.2;cursor:pointer}
 .uv-tab:hover{background:rgba(var(--ac-rgb),.14)}
-.uv-tab.on{color:var(--bg1);background:var(--st);border-color:var(--st);box-shadow:0 0 8px var(--st)}
-.uv-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;flex:none}
-.uv-cell{display:flex;flex-direction:column;gap:1px;padding:3px 5px;
+.uv-tab.on{color:var(--bg1);background:var(--st);border-color:var(--st)}
+/* Four stats on one row rather than a 2x2 grid: the grid cost 74px, which does not
+   fit once alerts are on screen. Full labels live in the tooltips. */
+.uv-stats{display:flex;gap:3px;flex:none}
+.uv-cell{flex:1;min-width:0;display:flex;flex-direction:column;gap:0;padding:2px 4px;
   border:1px solid rgba(var(--ac-rgb),.16);background:rgba(var(--ac-rgb),.04)}
-.uv-k{font-size:calc(8px*var(--fs));letter-spacing:1px;color:var(--dim)}
-.uv-v{font-size:calc(13px*var(--fs));font-weight:700;color:var(--st);text-shadow:0 0 8px var(--st)}
+.uv-k{font-size:calc(8px*var(--fs));line-height:1.1;letter-spacing:1px;color:var(--dim)}
+.uv-v{font-size:calc(12px*var(--fs));line-height:1.15;font-weight:700;color:var(--st);
+  text-shadow:0 0 4px var(--st);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .uv-ctx{display:flex;align-items:center;gap:6px;flex:none;font-size:calc(8px*var(--fs));color:var(--dim)}
 .uv-ctx[hidden]{display:none}
 .uv-bar{flex:1;position:relative;height:7px;background:rgba(var(--scan),.1);border:1px solid rgba(var(--scan),.14)}
 .uv-bar i{position:absolute;inset:0;width:0;background:linear-gradient(90deg,var(--st),transparent);
-  box-shadow:0 0 8px var(--st);transition:width .3s}
-.uv-bar i.warn{background:linear-gradient(90deg,var(--warn),transparent);box-shadow:0 0 8px var(--warn)}
-.uv-bar i.over{background:linear-gradient(90deg,var(--crit),transparent);box-shadow:0 0 8px var(--crit)}
-.uv-spark{display:flex;align-items:flex-end;gap:3px;flex:none;height:calc(26px*var(--fs))}
+  transition:width .3s}
+.uv-bar i.warn{background:linear-gradient(90deg,var(--warn),transparent)}
+.uv-bar i.over{background:linear-gradient(90deg,var(--crit),transparent)}
+/* The one row that absorbs slack — and the first to give it up. Capped, or with
+   no alerts on screen it would soak up the whole 300px stage and dominate a
+   page that is supposed to be about the numbers. */
+.uv-spark{display:flex;align-items:flex-end;gap:3px;flex:1 1 auto;min-height:8px;
+  max-height:calc(28px*var(--fs))}
+.uv-spark[hidden]{display:none}
 .uv-spark i{flex:1;min-height:2px;background:linear-gradient(180deg,var(--st),transparent);
   box-shadow:0 0 6px rgba(var(--ac-rgb),.35)}
 .uv-spark i.today{background:linear-gradient(180deg,var(--warn),transparent)}
@@ -266,15 +288,22 @@ body.usage-mode #pet,body.usage-mode .panel-ring{display:none}
    alerts. */
 #alertStack{flex:none;display:flex;flex-direction:column;gap:5px;margin-top:5px;pointer-events:none}
 #alertStack:empty{margin-top:0}
+/* fill-mode is `none`, not `both`. With `both` the card's resting state comes from
+   the keyframes, so if the animation never runs — throttled renderer, occluded or
+   backgrounded window — the card holds the `from` frame at opacity 0 forever: it
+   occupies 48px of layout and is completely invisible. Verified: three cards sat at
+   computed opacity 0. With `none` the base style (opaque) is what shows if the
+   animation does not run, and the animation still plays when it does. */
 .alert{position:relative;pointer-events:auto;cursor:pointer;overflow:hidden;
   padding:5px 8px 7px;border:1px solid rgba(var(--warn-rgb),.5);border-left:3px solid var(--warn);
   background:linear-gradient(160deg,var(--bg1),var(--bg2));
   box-shadow:0 0 14px rgba(var(--warn-rgb),.22);
-  animation:bubbleIn .18s ease-out both}
+  animation:bubbleIn .18s ease-out none}
 .alert.crit{border-color:rgba(var(--crit-rgb),.55);border-left-color:var(--crit);
   box-shadow:0 0 16px rgba(var(--crit-rgb),.32);
-  animation:bubbleIn .18s ease-out both, bubbleShake .45s ease-out .18s both}
-.alert.out{animation:bubbleOut .18s ease-in both}
+  animation:bubbleIn .18s ease-out none, bubbleShake .45s ease-out .18s none}
+/* The exit keeps `forwards` so the fade holds until the node is removed. */
+.alert.out{animation:bubbleOut .18s ease-in forwards}
 @keyframes bubbleIn{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
 @keyframes bubbleOut{to{opacity:0;transform:translateY(-6px) scale(.97)}}
 @keyframes bubbleShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-3px)}
@@ -288,7 +317,9 @@ body.usage-mode #pet,body.usage-mode .panel-ring{display:none}
 .al-x{flex:none;font-family:inherit;font-size:calc(11px*var(--fs));line-height:1;color:var(--dim);
   background:none;border:none;cursor:pointer;padding:0 1px}
 .al-x:hover{color:var(--txt)}
-.al-detail{margin-top:2px;font-size:calc(9px*var(--fs));color:var(--txt);opacity:.82;
+/* Solid, not 82% opaque: the detail line carries the actual numbers, and it was the
+   dimmest text in the card. */
+.al-detail{margin-top:2px;font-size:calc(9px*var(--fs));color:var(--txt);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .al-drain{position:absolute;left:0;bottom:0;height:2px;background:var(--warn);
   box-shadow:0 0 6px var(--warn);animation:drain 8s linear forwards}
@@ -329,7 +360,7 @@ window.__CONFIG__ = __CONFIG_PAYLOAD__;
   <div class="ubar" id="usageBar" title="点击查看用量详情">
     <span>↑<b id="uIn">—</b></span>
     <span>↓<b id="uOut">—</b></span>
-    <span class="uctx">CTX<b id="uCtxPct">--%</b><i class="ufill"><i id="uFill"></i></i></span>
+    <span class="uctx" title="当前上下文窗口占用">上下文<b id="uCtxPct">--%</b><i class="ufill"><i id="uFill"></i></i></span>
   </div>
   <div class="stage">
     <div class="panel-ring"></div>
@@ -340,11 +371,11 @@ window.__CONFIG__ = __CONFIG_PAYLOAD__;
         <button class="uv-tab" data-tab="today">今日</button>
         <button class="uv-tab" data-tab="total">累计</button>
       </div>
-      <div class="uv-grid">
-        <div class="uv-cell"><span class="uv-k">输入（含缓存）</span><span class="uv-v" id="uvIn">0</span></div>
-        <div class="uv-cell"><span class="uv-k">输出</span><span class="uv-v" id="uvOut">0</span></div>
-        <div class="uv-cell"><span class="uv-k">缓存命中</span><span class="uv-v" id="uvHit">—</span></div>
-        <div class="uv-cell"><span class="uv-k">API 调用</span><span class="uv-v" id="uvMsgs">0</span></div>
+      <div class="uv-stats">
+        <div class="uv-cell" title="输入 token（含缓存写入与缓存读取）"><span class="uv-k">输入</span><span class="uv-v" id="uvIn">0</span></div>
+        <div class="uv-cell" title="输出 token"><span class="uv-k">输出</span><span class="uv-v" id="uvOut">0</span></div>
+        <div class="uv-cell" title="缓存命中率（缓存读取 / 全部输入）"><span class="uv-k">缓存</span><span class="uv-v" id="uvHit">—</span></div>
+        <div class="uv-cell" title="API 调用次数（按 message.id 去重）"><span class="uv-k">调用</span><span class="uv-v" id="uvMsgs">0</span></div>
       </div>
       <div class="uv-ctx" id="uvCtxRow">
         <span>上下文</span>
@@ -500,10 +531,15 @@ function applyState(j){
   setVar('--st', color);
   led.style.background = color; led.style.boxShadow = '0 0 8px ' + color;
 
-  // a running tool says more than the word "WORKING"
+  // The big line is the STATE and it is always Chinese; the tool that is running
+  // goes on the sub-line, also Chinese. It used to be the other way round and in
+  // English ("WORKING", or the raw tool name uppercased as "BASH"), which said
+  // nothing in a language the panel is otherwise written in. The specific command
+  // hint the user still needs stays verbatim in the 现在 row ("运行 Bash").
   const tool = (s === 'working' && j.tool) ? j.tool : '';
-  stateEl.textContent = (tool || s).toUpperCase();
-  stateCn.textContent = tool ? (CN[s] + ' · ' + (TOOL_CN[tool] || tool)) : (CN[s] || '');
+  stateEl.textContent = CN[s] || s;
+  stateCn.textContent = tool ? (TOOL_CN[tool] || tool) : '';
+  stateCn.title = tool ? ('正在执行：' + tool) : '';
   ballStatus.textContent = tool ? (TOOL_CN[tool] || tool) : (CN[s] || '');
   petImg.classList.toggle('dim', s === 'offline');
 
@@ -578,7 +614,7 @@ function tick(){
   if (lastState){
     const age = Math.max(0, Date.now() - lastState.lastActivity);
     fill.style.width = Math.min(100, (age/30000)*100).toFixed(1) + '%';
-    ageEl.textContent = 'AGE ' + (age/1000).toFixed(1) + 's';
+    ageEl.textContent = '静默 ' + (age/1000).toFixed(1) + 's';
   }
 }
 
@@ -715,8 +751,10 @@ function openAlerts(){
 
 function renderAlerts(list){
   const all = list || [];
-  if (!all.length){ alertStack.innerHTML = ''; renderAlertIndicators(); return; }
-
+  // Deliberately NOT clearing the stack when the list is empty. It used to, which
+  // defeated the whole point of the 8s dismiss: a rule fires, the bubble appears,
+  // the condition lapses a second later and the very next frame wiped it. Bubbles
+  // now live out their own life and leave via the timer, the × or a click.
   for (const a of all){
     if (!a.firedAt) continue;
     if (seenAlerts.get(a.id) === a.firedAt) continue;
