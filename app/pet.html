@@ -909,6 +909,15 @@ function fmtTok(n){
   if (v < 1e6) return trim((v/1000).toFixed(1)) + 'k';
   return trim((v/1e6).toFixed(1)) + 'M';
 }
+// The sparkline prints a value in every 1/7th of a 320px panel; at the minimum
+// window width (260px) a six-character "121.7M" no longer fits its column. Above
+// 10M the decimal is noise anyway, so round it away (122M).
+function fmtSpark(n){
+  const v = Number(n) || 0;
+  if (v >= 1e7) return Math.round(v / 1e6) + 'M';
+  if (v >= 1e5) return Math.round(v / 1e3) + 'k';
+  return fmtTok(v);
+}
 function ctxLevel(pct){
   const c = alertCfg();
   if (pct >= (c.ctxCritPct || 92)) return 'over';
@@ -982,7 +991,7 @@ function renderUsageView(u){
     col.title = d.day + ' · ' + fmtTok(d.tokens) + ' tokens';
     const num = document.createElement('span');
     num.className = 'uv-num';
-    num.textContent = fmtTok(d.tokens);
+    num.textContent = fmtSpark(d.tokens);
     const track = document.createElement('span');
     track.className = 'uv-track';
     const bar = document.createElement('i');
@@ -1538,6 +1547,7 @@ document.querySelectorAll('.uv-tab').forEach((t) => t.addEventListener('click', 
   uvTab = t.dataset.tab;
   document.querySelectorAll('.uv-tab').forEach((x) => x.classList.toggle('on', x === t));
   if (lastState) renderUsageView(lastState.usage);
+  schedulePanelSync();   // today/total hide the session + context rows
 }));
 // Double-click = focus the terminal, but only on dead space. Without the guard a
 // double-click on a tab, a toggle or the font buttons also yanked the terminal to
