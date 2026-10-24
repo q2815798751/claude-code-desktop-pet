@@ -34,7 +34,7 @@
 | 进程探活 | 每 2s 一次 WMI | 每 8s，且 claude 干活时**完全跳过** |
 | 状态集 | thinking/working/working_long/done/idle/offline/error | 增加 **`awaiting`（在等你）**，`working` 带工具名 |
 | 本地安全 | 任意网页可 POST `/api/exit` 关掉桌宠 | 同源校验 |
-| 测试 | 无 | `node --test app/*.test.js`，111 条用例 |
+| 测试 | 无 | `node --test app/*.test.js`，119 条用例 |
 
 没装 hooks 也能用——会自动退回转录推断，只是精度下降。
 

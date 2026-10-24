@@ -53,7 +53,7 @@
   `listen` 失败（EADDRINUSE）输出可读错误；控制台与未捕获异常写入 `app/pet.log`。
 
 **测试**
-- 全量 `node --test app/*.test.js`：**111 条通过**。
+- 全量 `node --test app/*.test.js`：**119 条通过**。
 - 新增：全零 usage 占位去重、按会话上下文、陈旧 `term.pid` 不退出、工具名中文化、
   最新对话文本解析。
 
