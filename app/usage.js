@@ -23,7 +23,11 @@ const transcript = require('./transcript');
 
 const DEFAULT_DIR = path.join(os.homedir(), '.claude', 'projects');
 
-const LEDGER_VERSION = 1;
+// v2: per-session last turn + the zero-usage placeholder fix. Bumping the
+// version discards an old ledger rather than migrating it — the ledger is a
+// cache that can always be rebuilt by one (sliced) scan of the transcripts, and
+// the old one recorded the zero-token placeholders described in parseLine.
+const LEDGER_VERSION = 2;
 const RECENT_IDS_MAX = 32;        // ring: covers the duplicate run straddling a scan boundary
 const DAYS_KEEP = 60;             // day buckets retained in the ledger
 const SESSIONS_KEEP = 20;         // session buckets retained
@@ -81,6 +85,13 @@ function dayKey(ts) {
 
 // Most lines (user prompts, tool results, metadata) carry no usage at all, so the
 // cheap substring test runs before JSON.parse and skips the majority of the corpus.
+//
+// A thinking-only content block is written BEFORE the block that carries the real
+// numbers, and it repeats message.id with `input_tokens: 0, output_tokens: 0` and
+// no cache fields. Those placeholders must not be recorded: dedup is "the first
+// line with this id wins", so counting the placeholder also discards the real
+// usage — which is exactly how the context meter sat at 0/1M while the session
+// had hundreds of thousands of cached tokens.
 function parseLine(line) {
   if (line.indexOf('"usage"') === -1) return null;
   let o;
@@ -88,16 +99,19 @@ function parseLine(line) {
   const msg = o.message;
   if (!msg || !msg.id || !msg.usage) return null;
   const u = msg.usage;
-  const ts = o.timestamp ? Date.parse(o.timestamp) : NaN;
-  return {
+  const rec = {
     id: String(msg.id),
-    ts: Number.isFinite(ts) ? ts : 0,
+    ts: 0,
     model: String(msg.model || ''),
     in: num(u.input_tokens),
     out: num(u.output_tokens),
     cc: num(u.cache_creation_input_tokens),
     cr: num(u.cache_read_input_tokens),
   };
+  if (!rec.in && !rec.out && !rec.cc && !rec.cr) return null;
+  const ts = o.timestamp ? Date.parse(o.timestamp) : NaN;
+  rec.ts = Number.isFinite(ts) ? ts : 0;
+  return rec;
 }
 
 // ---- ledger -----------------------------------------------------------------
@@ -123,7 +137,8 @@ function createLedger() {
     days: {},
     sessions: {},
     recent: [],                 // last RECENT_CALLS records, for the cache-hit alert
-    lastTurn: null,             // { in, out, cc, cr, ts, model, file }
+    lastTurn: null,             // { in, out, cc, cr, ts, model, file } — newest call anywhere
+    lastBySession: {},          // session id -> its newest call, so "本次" context is per-session
     at: 0,
   };
 }
@@ -160,6 +175,10 @@ function forgetFile(ledger, frec) {
     if (isZero(ledger.sessions[s])) delete ledger.sessions[s];
   }
   if (ledger.lastTurn && ledger.lastTurn.file === frec.session) ledger.lastTurn = null;
+  // The per-session last call belongs to this transcript (session id == basename),
+  // so it goes with it. Without this, deleting a project would leave a stale
+  // context reading pointing at a conversation that no longer exists.
+  if (ledger.lastBySession) delete ledger.lastBySession[frec.session];
   // Recent records carry their origin so a rewritten file drops only its own.
   ledger.recent = (ledger.recent || []).filter((r) => r.f !== frec.session);
 }
@@ -167,6 +186,17 @@ function forgetFile(ledger, frec) {
 function bucket(map, key) {
   if (!map[key]) map[key] = emptyAgg();
   return map[key];
+}
+
+// Is this path provably gone? A missing listing is NOT evidence: readdir returns
+// [] both when the projects tree is genuinely empty and when it could not be read
+// (EACCES, EBUSY, a profile switch, a sandbox). Treating the two the same used to
+// unwind every rollup and zero the usage panel, then re-scan the whole corpus. So
+// ask the filesystem about the specific path, and only a definite ENOENT counts —
+// anything else (still there, permissions, unknown) keeps the entry.
+function goneFromDisk(p) {
+  try { fs.statSync(p); return false; }
+  catch (e) { return !!e && e.code === 'ENOENT'; }
 }
 
 function record(ledger, frec, r) {
@@ -180,9 +210,11 @@ function record(ledger, frec, r) {
   recent.push({ f: frec.session, in: r.in, out: r.out, cc: r.cc, cr: r.cr });
   while (recent.length > RECENT_CALLS) recent.shift();
 
-  if (!ledger.lastTurn || r.ts >= ledger.lastTurn.ts) {
-    ledger.lastTurn = { in: r.in, out: r.out, cc: r.cc, cr: r.cr, ts: r.ts, model: r.model, file: frec.session };
-  }
+  const turn = { in: r.in, out: r.out, cc: r.cc, cr: r.cr, ts: r.ts, model: r.model, file: frec.session };
+  if (!ledger.lastTurn || r.ts >= ledger.lastTurn.ts) ledger.lastTurn = turn;
+  if (!ledger.lastBySession) ledger.lastBySession = {};
+  const prev = ledger.lastBySession[frec.session];
+  if (!prev || r.ts >= prev.ts) ledger.lastBySession[frec.session] = turn;
 }
 
 function readRange(file, from, to) {
@@ -261,7 +293,11 @@ function prune(ledger) {
       lastAt[f.session] = Math.max(lastAt[f.session] || 0, f._stat.mtimeMs);
     }
     sess.sort((a, b) => (lastAt[a[0]] || 0) - (lastAt[b[0]] || 0));
-    while (sess.length > SESSIONS_KEEP) delete ledger.sessions[sess.shift()[0]];
+    while (sess.length > SESSIONS_KEEP) {
+      const id = sess.shift()[0];
+      delete ledger.sessions[id];
+      if (ledger.lastBySession) delete ledger.lastBySession[id];
+    }
   }
 }
 
@@ -278,9 +314,11 @@ function createScanner(opts) {
     if (!queue) {
       queue = transcript.listTranscripts(dir);
       // Whole directories disappear when a project is cleaned up; drop their bytes.
+      // But only when the file is actually gone — a listing that merely came back
+      // short must not be read as "everything was deleted" (see goneFromDisk).
       const alive = new Set(queue.map((e) => e.path));
       for (const [p, frec] of Object.entries(ledger.files)) {
-        if (!alive.has(p)) { forgetFile(ledger, frec); delete ledger.files[p]; }
+        if (!alive.has(p) && goneFromDisk(p)) { forgetFile(ledger, frec); delete ledger.files[p]; }
       }
       i = 0;
     }
@@ -325,7 +363,12 @@ function windowFor(model, fallback) {
 function snapshot(ledger, opts) {
   const cfg = (opts && opts.cfg) || {};
   const sessionId = (opts && opts.session) || null;
-  const last = ledger.lastTurn;
+  // "本次" must describe the session the panel is watching. Using the global last
+  // turn here was the other half of the wrong-context bug: with several terminals
+  // open, the newest file to be written is not necessarily the one on screen.
+  const last = sessionId
+    ? ((ledger.lastBySession && ledger.lastBySession[sessionId]) || null)
+    : ledger.lastTurn;
 
   const ctxTokens = last ? last.in + last.cc + last.cr + last.out : 0;
   // A transcript can outgrow the configured window (a proxy model, a wrong setting).
@@ -348,11 +391,13 @@ function snapshot(ledger, opts) {
 
   return {
     ready: !!(opts && opts.ready),
-    model: (last && last.model) || '',
+    model: (last && last.model) || (ledger.lastTurn && ledger.lastTurn.model) || '',
     session: bucketOut((sessionId && ledger.sessions[sessionId]) || empty),
     today: bucketOut(ledger.days[day] || empty),
     total: bucketOut(ledger.total),
-    lastTurn: last ? { in: last.in, out: last.out, cc: last.cc, cr: last.cr, ts: last.ts } : null,
+    lastTurn: ledger.lastTurn
+      ? { in: ledger.lastTurn.in, out: ledger.lastTurn.out, cc: ledger.lastTurn.cc, cr: ledger.lastTurn.cr, ts: ledger.lastTurn.ts }
+      : null,
     recent: bucketOut(recentAgg),
     ctx: {
       tokens: ctxTokens,
@@ -368,5 +413,5 @@ module.exports = {
   DEFAULT_DIR, LEDGER_VERSION, SPARK_DAYS, RECENT_IDS_MAX, MAX_FILE_BYTES,
   emptyAgg, addAgg, dayKey, hitPct, fmtTok,
   parseLine, ingest, scanOne, createLedger, loadLedger, saveLedger,
-  createScanner, snapshot,
+  createScanner, snapshot, goneFromDisk,
 };

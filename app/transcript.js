@@ -22,8 +22,40 @@ const ERROR_WINDOW_MS = 30000;
 // one: a session only needs its newest line plus its title, and the title lines
 // (ai-title / last-prompt) repeat every turn, so they are always in the tail.
 const SESSION_TAIL_BYTES = 64 * 1024;
+// A tool-heavy turn can append hundreds of KB with no text block at all (every
+// assistant line is a tool_use). The first read of a transcript therefore digs
+// deeper once, so the detail card can show the conversation's actual prompt;
+// later reads inherit it (see snapshotAll) instead of paying for the deep scan
+// on every append.
+const SESSION_DEEP_TAIL_BYTES = 1024 * 1024;
 const SESSION_MAX_AGE_MS = 30 * 60 * 1000; // a transcript untouched this long is not "open"
 const SESSION_LIMIT = 5;                   // never read more than this many per tick
+
+// The session detail card in the panel only has room for a couple of lines, so the
+// newest assistant/user text is clipped here rather than shipping a whole message
+// through SSE on every tick.
+const LAST_TEXT_MAX = 240;
+const LAST_USER_MAX = 120;
+
+function clipText(s, max) {
+  const t = String(s || '').replace(/\s+/g, ' ').trim();
+  if (t.length <= max) return t;
+  return t.slice(0, max - 1).trimEnd() + '…';
+}
+
+// Concatenated text blocks of a message. Tool results / tool_use / thinking are
+// deliberately excluded: the panel wants something a human wrote or read, not a
+// JSON blob. A tool_result carries no `text` block, so an array of only those
+// yields '' and the reverse walk keeps looking.
+function textBlocks(content) {
+  if (typeof content === 'string') return content.trim();
+  if (!Array.isArray(content)) return '';
+  const parts = [];
+  for (const c of content) {
+    if (c && c.type === 'text' && typeof c.text === 'string' && c.text.trim()) parts.push(c.text);
+  }
+  return parts.join(' ').trim();
+}
 
 const DEFAULT_DIR = path.join(os.homedir(), '.claude', 'projects');
 
@@ -113,6 +145,7 @@ function parseTail(text) {
   const lines = text.split('\n');
   let msg = null, tool = '', errAt = null, errSeen = false;
   let title = '', slug = '', cwd = '', branch = '', sid = '';
+  let lastText = '', lastTextTs = 0, lastUser = '', lastUserTs = 0;
 
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i].trim();
@@ -134,8 +167,23 @@ function parseTail(text) {
     if (!branch && o.gitBranch) branch = String(o.gitBranch);
     if (!sid) { if (o.sessionId) sid = String(o.sessionId); else if (o.session_id) sid = String(o.session_id); }
 
+    const role = (o.message && o.message.role) || '';
+    const content = o.message && o.message.content;
+
+    // Newest human-facing text in each direction. The panel shows the assistant's
+    // last words as "最新反馈"; the user's last prompt is the fallback while a
+    // turn is still running and there is no reply yet.
+    if (!lastText && (o.type === 'assistant' || role === 'assistant')) {
+      const t = textBlocks(content);
+      if (t) { lastText = clipText(t, LAST_TEXT_MAX); lastTextTs = hasTs ? ts : 0; }
+    }
+    if (!lastUser && o.type === 'user' && content) {
+      const t = textBlocks(content);
+      // `<...>` blocks are Claude Code's injected reminders, not typed input.
+      if (t && !/^<[a-z-]+>/i.test(t)) { lastUser = clipText(t, LAST_USER_MAX); lastUserTs = hasTs ? ts : 0; }
+    }
+
     if (!tool) {
-      const content = o.message && o.message.content;
       if (Array.isArray(content)) {
         for (let j = content.length - 1; j >= 0; j--) {
           const c = content[j];
@@ -149,7 +197,8 @@ function parseTail(text) {
       if (kind) msg = { kind, ts };
     }
   }
-  return { msg, tool, errAt, partial, title, slug, cwd, branch, sid };
+  return { msg, tool, errAt, partial, title, slug, cwd, branch, sid,
+    lastText, lastTextTs, lastUser, lastUserTs };
 }
 
 // A tool failure stays on screen while it is the newest thing that happened,
@@ -225,11 +274,27 @@ function snapshotAll(opts) {
   for (const f of live) {
     let rec = force ? null : sessionCache.get(f.path);
     if (!rec || rec.mtimeMs !== f.mtimeMs || rec.size !== f.size) {
+      // First sight (or force) gets the deep window; later appends get the cheap
+      // one and inherit whatever text was already found.
+      const firstSeen = !rec;
       let parsed;
       try {
-        parsed = parseTail(readTail(f.path, f.size, tailBytes));
+        parsed = parseTail(readTail(f.path, f.size, firstSeen ? SESSION_DEEP_TAIL_BYTES : tailBytes));
+        if (rec && f.size >= rec.size) {
+          // Append-only: the tail may contain no text block at all while claude
+          // runs tool after tool, so keep the newest text we already knew about.
+          if (!parsed.lastText && rec.parsed.lastText) {
+            parsed.lastText = rec.parsed.lastText;
+            parsed.lastTextTs = rec.parsed.lastTextTs;
+          }
+          if (!parsed.lastUser && rec.parsed.lastUser) {
+            parsed.lastUser = rec.parsed.lastUser;
+            parsed.lastUserTs = rec.parsed.lastUserTs;
+          }
+        }
       } catch {
-        parsed = { msg: null, tool: '', errAt: null, partial: false, title: '', slug: '', cwd: '', branch: '', sid: '' };
+        parsed = { msg: null, tool: '', errAt: null, partial: false, title: '', slug: '', cwd: '', branch: '', sid: '',
+          lastText: '', lastTextTs: 0, lastUser: '', lastUserTs: 0 };
       }
       rec = { mtimeMs: f.mtimeMs, size: f.size, parsed };
       sessionCache.set(f.path, rec);
@@ -255,6 +320,12 @@ function snapshotAll(opts) {
       msg,
       tool: p.tool,
       error: errorOf(p, now),
+      // Newest assistant reply / user prompt, already clipped for the panel's
+      // expandable session card. lastTs lets the server notice a new message
+      // that did not change the session's state or tool.
+      lastText: p.lastText || '',
+      lastUser: p.lastUser || '',
+      lastTs: Math.max(p.lastTextTs || 0, p.lastUserTs || 0),
     });
   }
   return out;

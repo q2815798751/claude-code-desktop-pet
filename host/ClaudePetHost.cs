@@ -20,6 +20,10 @@ public class PetHostBridge
     public PetHostBridge(MainForm f) { _f = f; }
     public void Move(int dx, int dy) { _f.MoveBy(dx, dy); }
     public void Resize(int w, int h) { _f.ResizeWindow(w, h); }
+    // Used by the panel's bottom-right grip: keeps the window's top-left corner
+    // fixed so the corner under the cursor moves with it. Resize() is anchored on
+    // the centre, which is right for the ball<->panel toggle but wrong for a drag.
+    public void ResizeKeepTopLeft(int w, int h) { _f.ResizeKeepTopLeft(w, h); }
     public void SetOpacity(int percent) { _f.SetOpacity(percent); }
     public void SetTopMost(bool top) { _f.SetTopMost(top); }
     public void Close() { _f.CloseHost(); }
@@ -41,8 +45,12 @@ public class MainForm : Form
     private Point _centre;
 
     public const string TITLE = "CLAUDE.PET";
+    private const string HOME_URL = "http://127.0.0.1:9876/";
     private const int DEF_W = 150, DEF_H = 170;
     private const int SAVE_SETTLE_MS = 400;
+    // Navigation retry: the exe can be launched a moment before the server is
+    // listening. One failed Navigate() used to leave a permanently blank window.
+    private int _navFails;
 
     [DllImport("dwmapi.dll")] public static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS m);
     [StructLayout(LayoutKind.Sequential)] public struct MARGINS { public int left, right, top, bottom; }
@@ -70,7 +78,7 @@ public class MainForm : Form
         Controls.Add(_web);
 
         Shown += async (s, e) => { try { await InitWebAsync(); } catch (Exception ex) { File.WriteAllText(_hostCfgPath + ".err", ex.ToString()); } };
-        FormClosing += (s, e) => { _saveTimer.Stop(); SaveHostConfig(); };
+        FormClosing += (s, e) => { _saveTimer.Stop(); SaveHostConfig(); SignalServerExit(); };
     }
 
     private bool GetBool(string k, bool d) { return _cfg.ContainsKey(k) ? Convert.ToBoolean(_cfg[k]) : d; }
@@ -128,6 +136,23 @@ public class MainForm : Form
         _centre = new Point(Location.X + Size.Width / 2, Location.Y + Size.Height / 2);
     }
 
+    // Drag-resize from the panel's bottom-right grip. Top-left stays put (unlike
+    // ResizeWindow, which grows around the centre). Size is clamped to the working
+    // area and the location is nudged back on-screen only when the new size would
+    // push the window past the right/bottom edge.
+    public void ResizeKeepTopLeft(int w, int h)
+    {
+        Rectangle sa = Screen.FromPoint(_centre).WorkingArea;
+        int nw = Math.Max(260, Math.Min(w, sa.Width));
+        int nh = Math.Max(300, Math.Min(h, sa.Height));
+        Size = new Size(nw, nh);
+        int nx = Math.Max(sa.Left, Math.Min(Location.X, sa.Right - nw));
+        int ny = Math.Max(sa.Top, Math.Min(Location.Y, sa.Bottom - nh));
+        Location = new Point(nx, ny);
+        RememberCentre();
+        Touch();
+    }
+
     private void Touch()
     {
         _dirty = true;
@@ -181,6 +206,49 @@ public class MainForm : Form
         catch { }
     }
 
+    // Closing the window means the pet is done: stop the node server too, instead
+    // of leaving a hidden scanner holding port 9876 until the next launch. The
+    // server's /api/exit is idempotent, so this is harmless when it already asked
+    // us to close (terminal ended / bubble menu Quit).
+    private void SignalServerExit()
+    {
+        try
+        {
+            var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(HOME_URL + "api/exit");
+            req.Method = "POST";
+            req.ContentLength = 0;
+            req.Timeout = 600;
+            req.ReadWriteTimeout = 600;
+            using (req.GetResponse()) { }
+        }
+        catch { /* server already gone, or still starting */ }
+    }
+
+    private bool _offlineShown;
+
+    private void NavigateHome()
+    {
+        _offlineShown = false;
+        try { _web.CoreWebView2.Navigate(HOME_URL); } catch { }
+    }
+
+    private void ShowOfflinePage()
+    {
+        _offlineShown = true;
+        try
+        {
+            _web.CoreWebView2.NavigateToString(
+                "<!doctype html><html><body style='margin:0;height:100vh;display:flex;" +
+                "align-items:center;justify-content:center;background:#04060d;color:#8fa6c4;" +
+                "font:12px Consolas,monospace;text-align:center;padding:12px'>" +
+                "<div><b style='color:#00f0ff'>CLAUDE.PET</b><br><br>" +
+                "cannot reach 127.0.0.1:9876<br><br>" +
+                "<span style='color:#5c6b80'>retrying...<br>start it from the Claude Pet shortcut</span>" +
+                "</div></body></html>");
+        }
+        catch { }
+    }
+
     private async Task InitWebAsync()
     {
         // DWM glass frame into the client area -> transparent window WITHOUT WS_EX_LAYERED
@@ -193,8 +261,23 @@ public class MainForm : Form
         _web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
         _web.CoreWebView2.Settings.IsStatusBarEnabled = false;
         _web.CoreWebView2.AddHostObjectToScript("petHost", _bridge);
-        _web.CoreWebView2.NavigationCompleted += (s, e) => ApplyPageOpacity();
-        _web.CoreWebView2.Navigate("http://127.0.0.1:9876/");
+        _web.CoreWebView2.NavigationCompleted += async (s, e) =>
+        {
+            if (e.IsSuccess)
+            {
+                // Our own "server unavailable" page also completes successfully;
+                // it must not look like the real page or the retry loop dies.
+                if (_offlineShown) return;
+                _navFails = 0;
+                ApplyPageOpacity();
+                return;
+            }
+            _navFails++;
+            if (_navFails >= 6) ShowOfflinePage();
+            await Task.Delay(_navFails < 6 ? 1200 : 5000);
+            NavigateHome();
+        };
+        NavigateHome();
     }
 }
 

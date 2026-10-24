@@ -17,6 +17,7 @@ const st = require('./state');
 const transcript = require('./transcript');
 const usage = require('./usage');
 const alerts = require('./alerts');
+const labels = require('./labels');
 const { safeJson } = require('./util');
 
 const ROOT = __dirname;
@@ -26,7 +27,13 @@ const TERM_PID_FILE = path.join(ROOT, 'term.pid');
 const CONFIG_FILE = path.join(ROOT, 'config.json');
 const USAGE_FILE = path.join(ROOT, 'usage.json');
 const RUNTIME_FILE = path.join(ROOT, 'runtime.ini');
+const LOG_FILE = path.join(ROOT, 'pet.log');
 const PROJECTS_DIR = transcript.DEFAULT_DIR;
+
+// The server runs behind a hidden window, so anything printed goes nowhere. Mirror
+// console output (and uncaught exceptions) into a rolling file, first thing, so a
+// crash leaves something to read.
+require('./log').open(LOG_FILE);
 
 const PORT = parseInt(process.env.CLAUDEPET_PORT, 10) || 9876;
 const HOST = '127.0.0.1';
@@ -64,13 +71,10 @@ const CFG = Object.assign({}, st.DEFAULTS, {
 
 const GIF_EXT = { '.gif': 'image/gif', '.png': 'image/png', '.ico': 'image/x-icon' };
 
-// The most recent tool action (for the "现在在做什么" line).
-const TOOL_LABELS = {
-  Bash: '运行 Bash', Edit: '编辑文件', Read: '读取文件', Write: '写文件',
-  Glob: '查找文件', Grep: '搜索代码', NotebookEdit: '编辑笔记', WebSearch: '联网搜索',
-  WebFetch: '抓取网页', Agent: '调用子代理', TaskCreate: '创建任务', TodoWrite: '更新任务',
-  Skill: '调用技能',
-};
+// The most recent tool action (for the "现在在做什么" line) is translated by
+// ./labels — `mcp__playwright__browser_take_screenshot` has no business being
+// printed raw into a 320px panel.
+const toolLabel = labels.toolLabel;
 
 // ---- mutable state ----
 let pet = st.initState(Date.now());
@@ -124,14 +128,26 @@ let usageReady = false;    // true once a full pass has completed
 let usageDirty = false;    // something changed since the last save
 let sweeping = false;      // a sliced pass is in flight
 let activeSession = null;  // transcript the panel is reporting on
-let lastUsage = usage.snapshot(ledger, { ready: false, now: Date.now() });
+let lastUsage = usageWithSession(usage.snapshot(ledger, { ready: false, now: Date.now() }));
 let alertState = alerts.createState();
 let currentAlerts = [];
 
-function usageSnapshot() {
-  return usage.snapshot(ledger, {
-    session: activeSession, cfg: config.usage, ready: usageReady, now: Date.now(),
+// "本次" in the usage page means the conversation the panel is currently
+// watching. The ledger knows the session by id (transcript basename); the
+// human-readable name lives on the session row, so attach it here — the page
+// cannot map an opaque uuid to an ai-title on its own.
+function usageWithSession(u) {
+  const s = sessions.find((x) => x.id === activeSession);
+  return Object.assign({}, u, {
+    sessionId: activeSession || '',
+    sessionTitle: (s && s.title) || '',
   });
+}
+
+function usageSnapshot() {
+  return usageWithSession(usage.snapshot(ledger, {
+    session: activeSession, cfg: config.usage, ready: usageReady, now: Date.now(),
+  }));
 }
 
 // One pass per interval, sliced so the first full scan never blocks the tick loop.
@@ -189,6 +205,10 @@ function readTermPid() {
 }
 let termPid = readTermPid();
 let termAlive = null;
+// A pid file can be stale (the user closed the pet terminal, then launched the
+// window only). Liveness alone must not shut the server down: it has to SEE the
+// terminal alive first, and only a later death is a real "terminal closed".
+let termSeenAlive = false;
 
 
 // ---- process probe (only to settle a quiet session; skipped while active) ----
@@ -256,7 +276,10 @@ async function updateProcesses(now) {
     const [c, t] = await Promise.all(tasks);
     procAlive = c.count > 0;
     procCount = c.count;
-    if (termPid) termAlive = !!t;
+    if (termPid) {
+      termAlive = !!t;
+      if (termAlive) termSeenAlive = true;
+    }
   }
 }
 
@@ -347,15 +370,27 @@ function buildSessions(list, now) {
     // Not shown as "current" once it has gone quiet — that is what makes the list
     // track terminals opening and closing rather than growing forever.
     if (ageMs > SESSION_SHOW_MS && !hooked) continue;
+    // ai-title is the human name Claude Code writes for a conversation. Without
+    // one, fall back to the project plus a short id — the random English slug
+    // ("functional-dazzling-thompson") is unreadable in a 320px row.
+    const title = s.title
+      || (s.project ? s.project + ' · ' + s.id.slice(0, 4) : '')
+      || s.slug
+      || ('会话 ' + s.id.slice(0, 4));
     out.push({
       id: s.id,
-      title: s.title || s.slug || s.project || s.id.slice(0, 8),
+      title,
       project: s.project,
       branch: s.branch && s.branch !== 'HEAD' ? s.branch : '',
       state: sessionState(s, now),
       tool: s.tool || '',
       ageMs,
       hooked,
+      // Shown in the expandable card under the row. Already clipped by the
+      // transcript reader so a huge reply cannot bloat every SSE frame.
+      lastText: s.lastText || '',
+      lastUser: s.lastUser || '',
+      lastTs: s.lastTs || 0,
     });
   }
   return out;
@@ -401,6 +436,7 @@ async function tick() {
   if (newPid !== termPid) {
     termPid = newPid;
     termAlive = null;          // unknown until checked
+    termSeenAlive = false;     // a new pid must prove itself before its death counts
     lastProbeAt = 0;           // force a probe this tick
   }
   if (termPid && termAlive === null) lastProbeAt = 0;
@@ -443,8 +479,11 @@ async function tick() {
 
   broadcast(false);
 
-  // terminal died -> pet self-exits within 5s (only when we know it is dead)
-  if (!shuttingDown && termPid && termAlive === false) beginShutdown();
+  // terminal died -> pet self-exits within 5s (only when we actually saw it
+  // alive; a stale term.pid at startup must not kill the pet before it appears)
+  if (!shuttingDown && termPid && termAlive === false && termSeenAlive) beginShutdown();
+  // the window is gone (closed/killed/crashed) -> nobody left to serve
+  if (!shuttingDown && sseGone(now)) beginShutdown();
   if (shuttingDown && now - shutdownAt >= SHUTDOWN_HOLD_MS) process.exit(0);
 }
 
@@ -465,7 +504,7 @@ function stateJson() {
     term: termPid,
     termAlive: termAlive === null ? null : !!termAlive,
     forced: !!forced,
-    lastAction: TOOL_LABELS[lastAction] || lastAction || '',
+    lastAction: toolLabel(lastAction) || lastAction || '',
     error: !!lastError,
     shutdown: shuttingDown,
     runtime: { node: runtime.NODE || null, claude: runtime.CLAUDE || null },
@@ -485,8 +524,10 @@ function stateSig(s) {
   const uSig = [u.ready ? 1 : 0, u.total ? u.total.msgs : 0, u.ctx ? u.ctx.tokens : 0].join(',');
   const aSig = (s.alerts || []).map((a) => a.id + ':' + a.firedAt + ':' + (a.active ? 1 : 0)).join(',');
   // Session ids and states only — an ageMs that ticks every second must not count
-  // as a change, or the panel would re-render (and re-push) constantly.
-  const sSig = (s.sessions || []).map((x) => x.id + ':' + x.state + ':' + x.tool).join(',');
+  // as a change, or the panel would re-render (and re-push) constantly. lastTs is
+  // the newest assistant/user message, so the detail card's "最新反馈" refreshes
+  // even when the phase and tool name stayed the same.
+  const sSig = (s.sessions || []).map((x) => x.id + ':' + x.state + ':' + x.tool + ':' + (x.lastTs || 0)).join(',');
   return [s.state, s.tool, s.long, s.claude, s.hooked, s.termAlive, s.lastAction, s.error,
     s.shutdown, s.forced, uSig, aSig, sSig, s.procs].join('|');
 }
@@ -512,14 +553,35 @@ function serveHtml(res) {
 function serveFile(res, name) {
   const safe = path.basename(name);
   const file = path.join(ROOT, safe);
-  if (!fs.existsSync(file)) { res.writeHead(404); res.end('not found'); return; }
+  // statSync, not existsSync: `GET /gifs/` resolves to ROOT itself, and handing a
+  // DIRECTORY to createReadStream emits EISDIR. With no 'error' listener that is an
+  // unhandled 'error' event, i.e. the whole pet server dies — reachable from any
+  // page that loads http://127.0.0.1:9876/gifs/ as an image.
+  let st;
+  try { st = fs.statSync(file); } catch { res.writeHead(404); res.end('not found'); return; }
+  if (!st.isFile()) { res.writeHead(404); res.end('not found'); return; }
   const type = GIF_EXT[path.extname(safe).toLowerCase()] || 'application/octet-stream';
   res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
-  fs.createReadStream(file).pipe(res);
+  const stream = fs.createReadStream(file);
+  // A read that fails after the headers are out (deleted mid-request, locked by AV)
+  // would otherwise be another unhandled 'error' that takes the server down.
+  stream.on('error', () => { try { res.destroy(); } catch {} });
+  stream.pipe(res);
 }
 
 // SSE — one push per actual change instead of two polls a second.
 const sseClients = new Set();
+// If a window has connected once and then every stream goes away, the pet window
+// is gone (closed normally, killed, or crashed). A short grace period covers an
+// EventSource reconnect; after that the server has nobody to serve and exits,
+// instead of lingering on port 9876 forever. Headless runs never open an SSE
+// stream, so hadWindow stays false and they are unaffected.
+const SSE_IDLE_EXIT_MS = 15000;
+let hadWindow = false;
+let lastSseAt = 0;
+function sseGone(now) {
+  return hadWindow && sseClients.size === 0 && lastSseAt > 0 && now - lastSseAt > SSE_IDLE_EXIT_MS;
+}
 
 function sseHandler(req, res) {
   res.writeHead(200, {
@@ -530,11 +592,13 @@ function sseHandler(req, res) {
   });
   res.write(': connected\n\n');
   sseClients.add(res);
+  hadWindow = true;
+  lastSseAt = Date.now();
   windowSeenAt = Date.now();
   const s = stateJson();
   lastSig = stateSig(s);
   res.write('event: state\ndata: ' + JSON.stringify(s) + '\n\n');
-  req.on('close', () => sseClients.delete(res));
+  req.on('close', () => { sseClients.delete(res); lastSseAt = Date.now(); });
 }
 
 function broadcast(force) {
@@ -566,11 +630,18 @@ function originAllowed(req) {
   return true;
 }
 
+// Read a request body with a hard cap. cb(null) means "refused": the caller answers
+// 4xx. It used to call req.destroy() on the way past the cap, which reset the socket
+// mid-upload so the client saw a bare connection error instead of a status.
 function readBody(req, limit, cb) {
-  let body = '';
-  req.on('data', (c) => { body += c; if (body.length > limit) req.destroy(); });
-  req.on('end', () => cb(body));
-  req.on('error', () => cb(''));
+  let body = '', over = false;
+  req.on('data', (c) => {
+    if (over) return;               // stop growing; keep draining so the peer can finish
+    body += c;
+    if (body.length > limit) { over = true; body = ''; }
+  });
+  req.on('end', () => cb(over ? null : body));
+  req.on('error', () => { if (!over) cb(''); });
 }
 
 const server = http.createServer((req, res) => {
@@ -595,6 +666,7 @@ const server = http.createServer((req, res) => {
 
       if (p === '/event') {
         return readBody(req, 64 * 1024, (body) => {
+          if (body === null) return json(res, { ok: false, error: 'body too large' }, 413);
           try { onHookEvent(JSON.parse(body || '{}'), Date.now()); } catch { /* ignore malformed */ }
           return json(res, { ok: true, state: pet.state });
         });
@@ -609,6 +681,7 @@ const server = http.createServer((req, res) => {
       }
       if (p === '/api/config') {
         return readBody(req, 4096, (body) => {
+          if (body === null) return json(res, { ok: false, error: 'body too large' }, 413);
           try {
             const c = JSON.parse(body || '{}');
             if (typeof c.theme === 'string') config.theme = c.theme;
@@ -636,7 +709,9 @@ const server = http.createServer((req, res) => {
           if (forced === 'auto') forced = null;
         } else if (q.has('state')) {
           const s = q.get('state');
-          forced = (s === 'auto' || !s) ? null : s;
+          // Only a real state name (or 'auto'/'') is accepted, so a typo cannot
+          // leave `forced` holding a value the page has no animation for.
+          forced = (s && st.STATES.indexOf(s) !== -1) ? s : null;
         } else {
           forced = forced ? null : 'thinking';
         }
@@ -658,10 +733,18 @@ const server = http.createServer((req, res) => {
   }
 });
 
+// A listen failure (EADDRINUSE — a second pet, or a stale server still holding the
+// port) is emitted as an 'error' event; with no listener Node rethrows it and the
+// process dies with a raw stack trace. Say something useful and leave cleanly.
+server.on('error', (err) => {
+  console.error('[pet] cannot listen on ' + HOST + ':' + PORT + ' — ' + (err && err.message ? err.message : err));
+  process.exit(1);
+});
+
 server.listen(PORT, HOST, () => {
   console.log(`[pet] listening on http://${HOST}:${PORT}`);
-  updateProcesses(Date.now()).then(() => {
-    // stale term pid at startup -> shut down
-    if (termPid && termAlive === false) beginShutdown();
-  }).catch(() => {});
+  // Warm the probe, but do NOT shut down on a dead pid here: a stale term.pid
+  // from a previous run used to make a fresh pet-server exit before the window
+  // could even connect (the "start failure" that looked random).
+  updateProcesses(Date.now()).catch(() => {});
 });

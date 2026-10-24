@@ -14,6 +14,8 @@ app/                  ← 部署单元（必须保持扁平：server.js 与 pet.
   transcript.js        转录快照（一次扫描 + 一次尾部读，按 (path,size,mtime) 缓存）
   usage.js             token 用量账本（增量扫描 jsonl，按 message.id 去重，落盘 usage.json）
   alerts.js            用量告警规则（纯函数、边沿触发 + 冷却）
+  labels.js            工具名 → 中文短标签（MCP 一并处理；pet.html 内有同步副本）
+  log.js               控制台 / 未捕获异常写入 pet.log（隐藏窗口下唯一现场）
   util.js              safeJson：SSR 注入转义
   pet.html             赛博朋克 HUD，EventSource 订阅 /events 切 GIF
   notify.cmd           hook 转发器（stdin → POST /event，永远 exit 0）

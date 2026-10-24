@@ -159,6 +159,18 @@ body.mode-panel #ball{display:none}
 .corner.tr{top:3px;right:3px;border-left:none;border-bottom:none}
 .corner.bl{bottom:3px;left:3px;border-right:none;border-top:none}
 .corner.br{bottom:3px;right:3px;border-left:none;border-top:none}
+/* Bottom-right resize grip. The host grows the window from its TOP-LEFT while
+   this is dragged (ResizeKeepTopLeft), so the corner under the cursor actually
+   follows the cursor; the centre-anchored panel/ball toggle keeps using the
+   ordinary Resize. */
+.grip{position:absolute;right:2px;bottom:2px;width:13px;height:13px;z-index:4;
+  cursor:nwse-resize;touch-action:none;
+  background:
+    linear-gradient(135deg,transparent 0 42%,rgba(var(--ac-rgb),.75) 42% 52%,transparent 52%) 0 0/7px 7px no-repeat,
+    linear-gradient(135deg,transparent 0 42%,rgba(var(--ac-rgb),.55) 42% 54%,transparent 54%) 4px 4px/8px 8px no-repeat,
+    repeating-linear-gradient(135deg,transparent 0 3px,rgba(var(--ac-rgb),.28) 3px 4px)}
+.grip:hover{filter:brightness(1.5)}
+body.resizing .grip{filter:brightness(1.8);box-shadow:0 0 8px rgba(var(--ac-rgb),.5)}
 
 /* The header and the state box are the panel's drag handle, the way a title bar
    would be. Everything interactive inside them opts out (see makeDraggable). */
@@ -190,6 +202,14 @@ body.mode-panel #ball{display:none}
   text-shadow:0 0 4px var(--st);display:flex;align-items:baseline;gap:8px;flex:none}
 .stateline .cn{font-size:calc(9px * var(--fs));letter-spacing:1px;color:var(--dim);font-weight:400;
   text-shadow:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Which model the current session is actually talking to. The relay changes the
+   backend more often than the panel changes themes, and "deepseek-v4.1-flash"
+   is not visible anywhere else in the UI. Full id stays in the tooltip. */
+.modelline{display:flex;align-items:baseline;gap:5px;margin-top:2px;min-width:0;
+  font-size:calc(9px * var(--fs));color:var(--dim);line-height:1.2}
+.modelline span{flex:none;letter-spacing:1px}
+.modelline b{color:var(--st);font-weight:600;min-width:0;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
 .bar{flex:none;height:5px;margin-top:5px;position:relative;background:rgba(var(--scan),.08);border:1px solid rgba(var(--scan),.12)}
 .bar i{position:absolute;inset:0;width:0%;background:linear-gradient(90deg,var(--st),transparent);box-shadow:0 0 8px var(--st);transition:width .4s linear}
 .bar u{position:absolute;right:0;top:-1px;font-size:calc(8px * var(--fs));color:var(--dim)}
@@ -200,6 +220,7 @@ body.mode-panel #ball{display:none}
   border:1px solid rgba(var(--ac-rgb),.18);background:rgba(var(--ac-rgb),.04);white-space:nowrap}
 .ubar:hover{background:rgba(var(--ac-rgb),.13)}
 .ubar b{color:var(--st);font-weight:600}
+.ubar .uwho{color:var(--dim);font-weight:400;letter-spacing:1px}
 .ubar .uctx{margin-left:auto;display:flex;align-items:center;gap:4px}
 .ubar .ufill{position:relative;display:block;width:calc(44px * var(--fs));height:6px;
   background:rgba(var(--scan),.12);border:1px solid rgba(var(--scan),.16)}
@@ -255,6 +276,15 @@ body.usage-mode #pet,body.usage-mode .panel-ring{display:none}
 .uv-k{font-size:calc(8px*var(--fs));line-height:1.1;letter-spacing:1px;color:var(--dim)}
 .uv-v{font-size:calc(12px*var(--fs));line-height:1.15;font-weight:700;color:var(--st);
   text-shadow:0 0 4px var(--st);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Which conversation "本次" is about. Without this line the session tab was an
+   anonymous set of numbers: with several terminals open there was no way to tell
+   which transcript produced them. */
+.uv-who{display:flex;align-items:baseline;gap:4px;flex:none;min-width:0;
+  font-size:calc(8px*var(--fs));line-height:1.2;color:var(--dim)}
+.uv-who[hidden]{display:none}
+.uv-who b{min-width:0;color:var(--txt);font-weight:600;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.uv-who .uv-sid{flex:none;color:var(--dim);font-size:calc(7px*var(--fs))}
 .uv-ctx{display:flex;align-items:center;gap:6px;flex:none;font-size:calc(8px*var(--fs));color:var(--dim)}
 .uv-ctx[hidden]{display:none}
 .uv-bar{flex:1;position:relative;height:7px;background:rgba(var(--scan),.1);border:1px solid rgba(var(--scan),.14)}
@@ -262,17 +292,23 @@ body.usage-mode #pet,body.usage-mode .panel-ring{display:none}
   transition:width .3s}
 .uv-bar i.warn{background:linear-gradient(90deg,var(--warn),transparent)}
 .uv-bar i.over{background:linear-gradient(90deg,var(--crit),transparent)}
-/* The one row that absorbs slack — and the first to give it up. Capped, or with
-   no alerts on screen it would soak up the whole 300px stage and dominate a
-   page that is supposed to be about the numbers. */
-.uv-spark{display:flex;align-items:flex-end;gap:3px;flex:1 1 auto;min-height:8px;
-  max-height:calc(28px*var(--fs))}
+/* The seven-day chart. Every column now carries its date and token total as
+   visible text; the hover title stays as a fuller fallback. Only the bar area is
+   allowed to flex, so the labels never get squeezed out. */
+.uv-spark{display:flex;align-items:stretch;gap:3px;flex:1 1 auto;
+  min-height:calc(44px*var(--fs));max-height:calc(50px*var(--fs))}
 .uv-spark[hidden]{display:none}
-.uv-spark i{flex:1;min-height:2px;background:linear-gradient(180deg,var(--st),transparent);
+.uv-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.uv-num,.uv-day{height:9px;font-size:calc(7px*var(--fs));line-height:1;color:var(--dim);
+  text-align:center;white-space:nowrap;overflow:hidden}
+.uv-col.today .uv-num,.uv-col.today .uv-day{color:var(--warn);font-weight:600}
+.uv-track{flex:1;min-height:8px;display:flex;align-items:flex-end;
+  background:rgba(var(--scan),.04);border-bottom:1px solid rgba(var(--scan),.12)}
+.uv-track i{width:100%;min-height:2px;background:linear-gradient(180deg,var(--st),transparent);
   box-shadow:0 0 6px rgba(var(--ac-rgb),.35)}
-.uv-spark i.today{background:linear-gradient(180deg,var(--warn),transparent)}
+.uv-track i.today{background:linear-gradient(180deg,var(--warn),transparent)}
 /* A day with no usage still needs a visible column, or the chart reads as gaps. */
-.uv-spark i.zero{background:rgba(var(--scan),.18);box-shadow:none}
+.uv-track i.zero{background:rgba(var(--scan),.18);box-shadow:none}
 .uv-foot{display:flex;align-items:center;gap:6px;flex:none;font-size:calc(8px*var(--fs));color:var(--dim)}
 .uv-foot .sp{margin-left:auto}
 .uv-toggle{font-family:inherit;font-size:calc(9px*var(--fs));font-weight:600;color:var(--txt);
@@ -281,19 +317,46 @@ body.usage-mode #pet,body.usage-mode .panel-ring{display:none}
 .uv-toggle.on{color:var(--bg1);background:var(--st);border-color:var(--st)}
 
 /* ---- concurrent sessions ---- */
-/* Only rendered with two or more sessions: a single row would just restate the
-   status line above it. Sits in the same column as the alert stack, below it, so
-   warnings keep priority and the pet yields the space to both. */
-#sessionList{flex:none;display:flex;flex-direction:column;gap:3px;margin-top:5px}
+/* A flex SIBLING of the stage, never an overlay: the pet keeps its own box and a
+   detail card can only take vertical space from the column, so it cannot cover the
+   pet image. The panel height is synced to the content (see syncPanelHeight) and
+   the list is capped + scrollable as a last resort, so neither the footer nor the
+   bottom of a long card is ever clipped out of the window. */
+#sessionList{flex:none;display:flex;flex-direction:column;gap:3px;margin-top:5px;
+  max-height:calc(170px * var(--fs));overflow-y:auto;overscroll-behavior:contain}
 #sessionList:empty{margin-top:0}
-.srow{display:flex;align-items:center;gap:5px;padding:2px 6px;
+#sessionList::-webkit-scrollbar{width:4px}
+#sessionList::-webkit-scrollbar-thumb{background:rgba(var(--ac-rgb),.35)}
+.srow{display:flex;align-items:center;gap:5px;padding:2px 6px;cursor:pointer;
   font-size:calc(8px*var(--fs));line-height:1.3;font-weight:600;
   border:1px solid rgba(var(--ac-rgb),.16);background:rgba(var(--ac-rgb),.04);
   white-space:nowrap;overflow:hidden}
+.srow:hover{background:rgba(var(--ac-rgb),.13)}
+.srow.open{background:rgba(var(--ac-rgb),.16);border-color:rgba(var(--ac-rgb),.45)}
 .srow .sdot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--dim)}
 .srow .stitle{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--txt)}
 .srow .smeta{flex:none;color:var(--dim);font-weight:400}
+.srow .schev{flex:none;width:8px;color:var(--dim);font-size:calc(7px*var(--fs));
+  transition:transform .15s ease;text-align:center}
+.srow.open .schev{transform:rotate(90deg);color:var(--st)}
 .srow.more{justify-content:center;color:var(--dim);font-weight:400}
+/* Expanded detail: a card in the column under its row. `white-space:normal` is
+   essential — the row rule is nowrap and would otherwise inherit down here. */
+.sdetail{margin:-1px 0 2px;padding:4px 7px 5px;cursor:default;
+  border:1px solid rgba(var(--ac-rgb),.28);border-left:2px solid var(--st);
+  background:rgba(var(--bg1-rgb),.55);
+  display:flex;flex-direction:column;gap:3px;
+  font-size:calc(8px*var(--fs));line-height:1.35;white-space:normal}
+.sd-title{color:var(--txt);font-weight:700;font-size:calc(9px*var(--fs));line-height:1.3;
+  overflow-wrap:anywhere}
+.sd-meta{display:flex;flex-wrap:wrap;gap:2px 8px;color:var(--dim)}
+.sd-meta b{color:var(--txt);font-weight:600}
+.sd-k{color:var(--dim);font-weight:600;letter-spacing:1px;flex:none}
+.sd-msg{display:flex;gap:4px;color:var(--txt);overflow-wrap:anywhere}
+.sd-msg .sd-t{min-width:0;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;
+  overflow:hidden;word-break:break-word}
+.sd-msg.none .sd-t{color:var(--dim);font-style:italic}
+.sd-raw{color:var(--dim)}
 
 .nowbar{flex:none;display:flex;gap:6px;margin-top:4px;font-size:calc(9px*var(--fs));font-weight:600;color:var(--dim);
   border:1px solid rgba(var(--ac-rgb),.18);background:rgba(var(--ac-rgb),.04);padding:2px 6px;
@@ -349,10 +412,12 @@ body.usage-mode #pet,body.usage-mode .panel-ring{display:none}
 .al-x{flex:none;font-family:inherit;font-size:calc(11px*var(--fs));line-height:1;color:var(--dim);
   background:none;border:none;cursor:pointer;padding:0 1px}
 .al-x:hover{color:var(--txt)}
-/* Solid, not 82% opaque: the detail line carries the actual numbers, and it was the
-   dimmest text in the card. */
-.al-detail{margin-top:2px;font-size:calc(9px*var(--fs));color:var(--txt);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Two lines, not one. The detail is the part with the actual numbers and it used
+   to be ellipsised at 320px whenever the numbers got long (cache hit + input).
+   Full text is still in the title attribute, and the panel grows to make room. */
+.al-detail{margin-top:2px;font-size:calc(9px*var(--fs));line-height:1.25;color:var(--txt);
+  white-space:normal;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical;overflow:hidden}
 .al-drain{position:absolute;left:0;bottom:0;height:2px;background:var(--warn);
   box-shadow:0 0 6px var(--warn);animation:drain 8s linear forwards}
 .alert.crit .al-drain{background:var(--crit);box-shadow:0 0 6px var(--crit)}
@@ -387,9 +452,11 @@ window.__CONFIG__ = __CONFIG_PAYLOAD__;
   </div>
   <div class="statebox">
     <div class="stateline"><span id="state">BOOT</span><span class="cn" id="statecn"></span></div>
+    <div class="modelline"><span>模型</span><b id="model">—</b></div>
     <div class="bar"><i id="fill"></i><u id="age">AGE --</u></div>
   </div>
   <div class="ubar" id="usageBar" title="点击查看用量详情">
+    <span class="uwho">本次</span>
     <span>↑<b id="uIn">—</b></span>
     <span>↓<b id="uOut">—</b></span>
     <span class="uctx" title="当前上下文窗口占用">上下文<b id="uCtxPct">--%</b><i class="ufill"><i id="uFill"></i></i></span>
@@ -402,6 +469,11 @@ window.__CONFIG__ = __CONFIG_PAYLOAD__;
         <button class="uv-tab on" data-tab="session">本次</button>
         <button class="uv-tab" data-tab="today">今日</button>
         <button class="uv-tab" data-tab="total">累计</button>
+      </div>
+      <div class="uv-who" id="uvWhoRow">
+        <span class="uv-k">本次会话</span>
+        <b id="uvWho">—</b>
+        <span class="uv-sid" id="uvSid"></span>
       </div>
       <div class="uv-stats">
         <div class="uv-cell" title="输入 token（含缓存写入与缓存读取）"><span class="uv-k">输入</span><span class="uv-v" id="uvIn">0</span></div>
@@ -416,10 +488,9 @@ window.__CONFIG__ = __CONFIG_PAYLOAD__;
       </div>
       <div class="uv-spark" id="uvSpark"></div>
       <div class="uv-foot">
+        <span>近 7 天用量</span>
+        <span class="sp"></span>
         <span>告警</span><button class="uv-toggle on" id="uvAlerts">开</button>
-        <span class="sp">字号</span>
-        <button class="uv-toggle" id="uvFsMinus">A−</button>
-        <button class="uv-toggle" id="uvFsPlus">A+</button>
       </div>
     </div>
   </div>
@@ -433,6 +504,7 @@ window.__CONFIG__ = __CONFIG_PAYLOAD__;
       <button class="btn" id="bTerm">终端</button>
     </div>
   </div>
+  <div class="grip" id="grip" title="拖动调整面板大小 · 双击恢复默认"></div>
 </div>
 
 <div id="bubbles"></div>
@@ -449,16 +521,92 @@ const STATE_COLORS = {
   ocean:  { thinking:'#00e5ff', working:'#00ffb3', awaiting:'#ffd166', done:'#7c4dff', idle:'#5a9aa8', offline:'#ff5a5a', error:'#ff4d4d' },
 };
 const CN = { thinking:'思考中', working:'工作中', awaiting:'等待输入', done:'完成', idle:'待命', offline:'离线', error:'异常' };
-// tool name -> 中文（与 server.js 的 TOOL_LABELS 保持一致，仅用于状态行）
+// tool name -> 中文. Mirrors app/labels.js (the page is a single static file, so
+// the two tables have to stay in step). Long MCP names such as
+// mcp__playwright__browser_take_screenshot are shown as "浏览器·截图" — the raw
+// name only lives in the hover tooltip.
 const TOOL_CN = {
-  Bash:'运行命令', Edit:'编辑文件', Read:'读取文件', Write:'写文件', Glob:'查找文件', Grep:'搜索代码',
-  NotebookEdit:'编辑笔记', WebSearch:'联网搜索', WebFetch:'抓取网页', Agent:'调用子代理',
-  TaskCreate:'创建任务', TodoWrite:'更新任务', Skill:'调用技能',
+  Bash:'运行命令', BashOutput:'查看输出', KillShell:'结束进程',
+  Read:'读取文件', Edit:'编辑文件', MultiEdit:'批量编辑', Write:'写文件',
+  NotebookRead:'读取笔记', NotebookEdit:'编辑笔记', Glob:'查找文件', Grep:'搜索代码', LS:'列目录',
+  WebSearch:'联网搜索', WebFetch:'抓取网页',
+  Agent:'调用子代理', Task:'调用子代理', TaskOutput:'读取代理结果', TaskStop:'停止子代理',
+  TaskCreate:'创建任务', TaskUpdate:'更新任务', TaskList:'查看任务', TaskGet:'查看任务',
+  TodoWrite:'更新任务', Skill:'调用技能', SlashCommand:'执行命令',
+  EnterPlanMode:'进入规划', ExitPlanMode:'提交计划', AskUserQuestion:'询问用户',
+  ListMcpResources:'列出外部资源', ReadMcpResource:'读取外部资源',
 };
+const MCP_SERVER_CN = {
+  playwright:'浏览器', puppeteer:'浏览器', 'chrome-devtools':'浏览器', chromeDevtools:'浏览器',
+  'brave-search':'联网搜索', context7:'文档', filesystem:'文件', github:'代码库', git:'代码库',
+  coderabbit:'代码审查', sqlite:'数据库', postgres:'数据库', postgresql:'数据库', mysql:'数据库',
+  memory:'记忆', 'sequential-thinking':'推理', sequentialthinking:'推理', fetch:'网页',
+  time:'时间', notion:'笔记', slack:'聊天', sentry:'监控', 'desktop-commander':'桌面控制', everything:'示例',
+};
+const MCP_TOOL_CN = {
+  browser_click:'点击', browser_navigate:'打开网页', browser_navigate_back:'后退',
+  browser_evaluate:'执行脚本', browser_run_code_unsafe:'执行脚本', browser_take_screenshot:'截图',
+  browser_snapshot:'读取页面', browser_find:'查找页面', browser_wait_for:'等待',
+  browser_console_messages:'读取控制台', browser_network_requests:'读取网络',
+  browser_network_request:'读取请求', browser_close:'关闭页面', browser_resize:'调整窗口',
+  browser_press_key:'按键', browser_type:'输入文本', browser_hover:'悬停', browser_drag:'拖拽',
+  browser_drop:'拖放', browser_fill_form:'填写表单', browser_select_option:'选择选项',
+  browser_tabs:'切换标签', browser_file_upload:'上传文件', browser_handle_dialog:'处理弹窗',
+  browser_emulate_media:'模拟媒体', browser_install:'安装浏览器',
+};
+const MCP_TOOL_HINTS = [
+  ['screenshot','截图'], ['click','点击'], ['navigate','打开网页'], ['console','读取控制台'],
+  ['network','读取网络'], ['evaluate','执行脚本'], ['search','搜索'], ['find','查找'],
+  ['query','查询'], ['resolve','查询'], ['read','读取'], ['get','读取'], ['list','列表'],
+  ['create','创建'], ['write','写入'], ['update','更新'], ['edit','编辑'], ['delete','删除'],
+  ['execute','执行'], ['run','执行'], ['type','输入'], ['wait','等待'], ['open','打开'], ['close','关闭'],
+];
+function mcpToolWord(tool){
+  if (MCP_TOOL_CN[tool]) return MCP_TOOL_CN[tool];
+  const low = String(tool || '').toLowerCase();
+  for (const [needle, cn] of MCP_TOOL_HINTS) if (low.indexOf(needle) !== -1) return cn;
+  return '调用';
+}
+function toolLabel(name){
+  const raw = String(name || '').trim();
+  if (!raw) return '';
+  if (TOOL_CN[raw]) return TOOL_CN[raw];
+  if (raw.indexOf('mcp__') === 0){
+    const parts = raw.split('__');
+    const srv = parts[1] || '';
+    const act = parts.slice(2).join('__');
+    return (MCP_SERVER_CN[srv] || '外部') + '·' + mcpToolWord(act);
+  }
+  if (/^mcp[-_]/.test(raw)){
+    const low = raw.toLowerCase();
+    for (const key of Object.keys(MCP_SERVER_CN)){
+      if (low.indexOf(key.toLowerCase()) !== -1) return MCP_SERVER_CN[key] + '·' + mcpToolWord(low);
+    }
+    return '外部工具';
+  }
+  if (raw.length > 14 && /^[\x20-\x7e]+$/.test(raw)) return '工具';
+  return raw;
+}
+function toolTitle(name){
+  const raw = String(name || '').trim();
+  const label = toolLabel(raw);
+  return label && label !== raw ? label + '（' + raw + '）' : raw;
+}
 const THEMES = ['cyber','paper','matrix','gold','sunset','ocean'];
 const THEME_NAMES = { cyber:'CYBER', paper:'PAPER', matrix:'MATRIX', gold:'GOLD', sunset:'SUNSET', ocean:'OCEAN' };
 const FS_MIN = 0.85, FS_MAX = 1.35;
 const BALL_W = 150, BALL_H = 170, PANEL_W = 320, PANEL_H = 480;
+// The panel is a column of fixed-height rows plus a flexible pet stage. At the
+// maximum font size (--fs 1.35) three alert cards + the session list need more
+// than 480px, and the footer used to be pushed below the window (invisible).
+// syncPanelHeight() measures the minimum the column needs and asks the host to
+// grow the window to fit; the pet stage stays at STAGE_MIN_H, so the pet keeps
+// its box and detail cards can never cover it.
+const PANEL_MAX_H = 820, STAGE_MIN_H = 118;
+const PANEL_MIN_W = 260, PANEL_MAX_W = 720;
+let panelH = PANEL_H;
+let panelW = PANEL_W;
+let manualPanel = false;     // user dragged the grip: never auto-shrink their size
 const ALERT_TTL = 8000, ALERT_MAX = 3;   // how long a bubble lives, how many stack
 
 const ball = document.getElementById('ball');
@@ -480,6 +628,8 @@ const forcedTag = document.getElementById('forcedTag');
 const titleTxt = document.getElementById('titleTxt');
 const toast = document.getElementById('toast');
 const nowEl = document.getElementById('now');
+const modelEl = document.getElementById('model');
+const gripEl = document.getElementById('grip');
 const alertBadge = document.getElementById('alertBadge');
 const alertStack = document.getElementById('alertStack');
 const sessionList = document.getElementById('sessionList');
@@ -497,6 +647,9 @@ const uvCtxRow = document.getElementById('uvCtxRow');
 const uvCtx = document.getElementById('uvCtx');
 const uvFill = document.getElementById('uvFill');
 const uvSpark = document.getElementById('uvSpark');
+const uvWhoRow = document.getElementById('uvWhoRow');
+const uvWho = document.getElementById('uvWho');
+const uvSid = document.getElementById('uvSid');
 const uvAlerts = document.getElementById('uvAlerts');
 const bUsage = document.getElementById('bUsage');
 
@@ -520,11 +673,102 @@ function callHost(method){
 }
 
 // ---- mode ----
+// classList, not `body.className = ...`. The old assignment silently dropped
+// `usage-mode` on every ball<->panel switch, and the usage page then shared the
+// stage with the pet image instead of replacing it — the overlap users saw when
+// they opened the panel with the usage page still open.
 function setMode(m){
   mode = m;
-  document.body.className = 'mode-' + m;
-  if (m === 'panel') callHost('Resize', PANEL_W, PANEL_H);
-  else callHost('Resize', BALL_W, BALL_H);
+  document.body.classList.remove('mode-ball', 'mode-panel');
+  document.body.classList.add('mode-' + m);
+  if (m === 'panel') {
+    callHost('Resize', panelW, panelH);
+    schedulePanelSync(140);           // after the viewport has actually grown
+  } else {
+    callHost('Resize', BALL_W, BALL_H);
+  }
+}
+
+// ---- panel height sync ----
+// Coalesced: every SSE frame can ask, but at most one measure per tick. The
+// stage is measured at its minimum height, not its current flexed height, so
+// growing the window does not feed back into a bigger request.
+function maxPanelH(){
+  const ah = (window.screen && window.screen.availHeight) || PANEL_MAX_H;
+  return Math.max(PANEL_H, Math.min(PANEL_MAX_H, ah - 30));
+}
+function maxPanelW(){
+  const aw = (window.screen && window.screen.availWidth) || PANEL_MAX_W;
+  return Math.max(PANEL_MIN_W, Math.min(PANEL_MAX_W, aw - 20));
+}
+let panelSyncTimer = null;
+function schedulePanelSync(delay){
+  if (panelSyncTimer) return;
+  panelSyncTimer = setTimeout(() => { panelSyncTimer = null; syncPanelHeight(); }, delay || 80);
+}
+// The usage page is an absolute layer inside the stage. Its intrinsic height is
+// what the stage has to provide when it is open — measuring its BOX would feed
+// the panel's own growth back into the next measurement, so every row is summed
+// and the spark chart is taken at its fixed minimum slot rather than its current
+// stretched height.
+function measureUsageMin(){
+  if (!usageOpen || !usageViewEl || usageViewEl.hidden) return 0;
+  const cs = getComputedStyle(usageViewEl);
+  const gap = parseFloat(cs.rowGap || cs.gap) || 0;
+  let sum = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+  let n = 0;
+  for (const el of usageViewEl.children){
+    if (el.hidden) continue;
+    const s = getComputedStyle(el);
+    // The spark slot is taken at a fixed minimum that leaves room for its value
+    // and date labels plus a readable bar area (~28px at fs=1); using the live
+    // element height would ratchet the panel taller on every sync.
+    const h = el.classList.contains('uv-spark') ? Math.round(44 * Math.max(1, fs)) : el.getBoundingClientRect().height;
+    sum += h + (parseFloat(s.marginTop) || 0) + (parseFloat(s.marginBottom) || 0);
+    n++;
+  }
+  if (n > 1) sum += gap * (n - 1);
+  return Math.ceil(sum);
+}
+function measurePanelMin(){
+  const p = document.getElementById('panel');
+  const cs = getComputedStyle(p);
+  let h = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
+        + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+  for (const el of p.children){
+    if (el.classList.contains('corner') || el.classList.contains('grip')) continue;
+    if (el.classList.contains('stage')) {
+      h += Math.max(STAGE_MIN_H, measureUsageMin());
+      continue;
+    }
+    const s = getComputedStyle(el);
+    h += el.getBoundingClientRect().height
+       + (parseFloat(s.marginTop) || 0) + (parseFloat(s.marginBottom) || 0);
+  }
+  return Math.ceil(h);
+}
+function syncPanelHeight(){
+  if (mode !== 'panel') return;
+  // Before the host resize lands the page is still 150px wide, where Chinese
+  // wraps three times as often and the measurement is nonsense.
+  if (window.innerWidth < 300) { schedulePanelSync(160); return; }
+  const need = measurePanelMin();
+  const cap = maxPanelH();
+  const target = Math.max(PANEL_H, Math.min(cap, need));
+  if (manualPanel) {
+    // The user chose this size. A wider panel can still need more height (less
+    // wrapping usually means less, so this rarely fires), but never shrink it
+    // back under their hand.
+    if (need > panelH + 4) {
+      panelH = Math.min(cap, need);
+      callHost('Resize', panelW, panelH);
+    }
+    return;
+  }
+  if (Math.abs(target - panelH) >= 4){
+    panelH = target;
+    callHost('Resize', panelW, target);
+  }
 }
 
 // ---- drag (ball and panel share it) ----
@@ -572,9 +816,9 @@ function applyState(j){
   // hint the user still needs stays verbatim in the 现在 row ("运行 Bash").
   const tool = (s === 'working' && j.tool) ? j.tool : '';
   stateEl.textContent = CN[s] || s;
-  stateCn.textContent = tool ? (TOOL_CN[tool] || tool) : '';
-  stateCn.title = tool ? ('正在执行：' + tool) : '';
-  ballStatus.textContent = tool ? (TOOL_CN[tool] || tool) : (CN[s] || '');
+  stateCn.textContent = tool ? toolLabel(tool) : '';
+  stateCn.title = tool ? ('正在执行：' + toolTitle(tool)) : '';
+  ballStatus.textContent = tool ? toolLabel(tool) : (CN[s] || '');
   petImg.classList.toggle('dim', s === 'offline');
 
   const gifKey = (s === 'working' && j.long) ? 'working_long' : s;
@@ -643,7 +887,7 @@ function applyTheme(t){
   persistConfig();
 }
 function cycleTheme(){ applyTheme(THEMES[(THEMES.indexOf(theme)+1) % THEMES.length]); toastMsg('THEME ' + THEME_NAMES[theme]); }
-function applyFs(v){ fs = Math.min(FS_MAX, Math.max(FS_MIN, v)); setVar('--fs', String(fs)); }
+function applyFs(v){ fs = Math.min(FS_MAX, Math.max(FS_MIN, v)); setVar('--fs', String(fs)); schedulePanelSync(120); }
 
 function tick(){
   const d = new Date();
@@ -671,6 +915,16 @@ function ctxLevel(pct){
   if (pct >= (c.ctxWarnPct || 80)) return 'warn';
   return '';
 }
+// "deepseek/deepseek-v4.1-flash-1017" -> "deepseek-v4.1-flash". The relay's build
+// stamp (and a provider prefix) is noise at 9px; the untouched id is the tooltip.
+function modelText(m){
+  const raw = String(m || '').trim();
+  if (!raw) return '';
+  return raw.split('/').pop()
+    .replace(/-\d{4}-\d{2}-\d{2}$/, '')
+    .replace(/-\d{8}$/, '')
+    .replace(/-\d{4}$/, '');
+}
 function renderUsage(u){
   if (!u) return;
   const ready = !!u.ready;
@@ -678,12 +932,16 @@ function renderUsage(u){
   const pct = (u.ctx && u.ctx.pct) || 0;
   uIn.textContent = ready ? fmtTok(s.input) : '…';
   uOut.textContent = ready ? fmtTok(s.out) : '…';
+  modelEl.textContent = ready ? (modelText(u.model) || '—') : '…';
+  modelEl.title = u.model ? ('当前模型：' + u.model) : '尚未识别到模型';
   uCtxPct.textContent = ready ? pct + '%' : '--%';
   uFill.style.width = (ready ? pct : 0) + '%';
   const lv = ready ? ctxLevel(pct) : '';
   usageBar.classList.toggle('warn', lv === 'warn');
   usageBar.classList.toggle('over', lv === 'over');
-  usageBar.title = '本次会话 token · 上下文 ' + pct + '% — 点击查看详情';
+  const who = u.sessionTitle || (u.sessionId ? '会话 ' + u.sessionId.slice(0, 8) : '');
+  usageBar.title = (who ? '本次会话：' + who + '\n' : '')
+    + '本次 token · 上下文 ' + pct + '% — 点击查看详情';
 }
 function renderUsageView(u){
   if (!u) return;
@@ -693,6 +951,17 @@ function renderUsageView(u){
   uvHit.textContent = (b.hit === null || b.hit === undefined) ? '—' : b.hit + '%';
   uvMsgs.textContent = String(b.msgs || 0);
 
+  // Only the session tab has a conversation to name; today/total are aggregates.
+  const sid = u.sessionId || '';
+  uvWhoRow.hidden = uvTab !== 'session';
+  if (uvTab === 'session'){
+    uvWho.textContent = u.sessionTitle || (sid ? '未命名会话' : '暂无活动会话');
+    uvSid.textContent = sid ? sid.slice(0, 8) : '';
+    const tip = (u.sessionTitle ? u.sessionTitle + '\n' : '') + (sid ? '会话 ID：' + sid : '未识别到当前会话');
+    uvWho.title = tip;
+    uvWhoRow.title = tip;
+  }
+
   const ctx = u.ctx || { tokens:0, window:0, pct:0 };
   // The context figure is a property of the running session, not of a day bucket.
   uvCtxRow.hidden = uvTab !== 'session';
@@ -700,16 +969,32 @@ function renderUsageView(u){
   uvFill.style.width = ctx.pct + '%';
   uvFill.className = ctxLevel(ctx.pct);
 
+  // Seven columns, each labelled in place: value above the bar, date below. The
+  // old chart only exposed a day's numbers through a hover title, which is not a
+  // chart you can read at a glance (or on a touchpad).
   const spark = u.spark || [];
   const max = Math.max(1, spark.map((d) => d.tokens).reduce((a, c) => Math.max(a, c), 0));
   uvSpark.innerHTML = '';
   spark.forEach((d, i) => {
-    const el = document.createElement('i');
-    el.style.height = Math.max(3, Math.round((d.tokens / max) * 100)) + '%';
-    if (!d.tokens) el.classList.add('zero');
-    if (i === spark.length - 1) el.classList.add('today');
-    el.title = d.day + ' · ' + fmtTok(d.tokens) + ' tokens';
-    uvSpark.appendChild(el);
+    const isToday = i === spark.length - 1;
+    const col = document.createElement('div');
+    col.className = 'uv-col' + (isToday ? ' today' : '');
+    col.title = d.day + ' · ' + fmtTok(d.tokens) + ' tokens';
+    const num = document.createElement('span');
+    num.className = 'uv-num';
+    num.textContent = fmtTok(d.tokens);
+    const track = document.createElement('span');
+    track.className = 'uv-track';
+    const bar = document.createElement('i');
+    bar.style.height = Math.max(2, Math.round((d.tokens / max) * 100)) + '%';
+    if (!d.tokens) bar.classList.add('zero');
+    if (isToday) bar.classList.add('today');
+    track.appendChild(bar);
+    const day = document.createElement('span');
+    day.className = 'uv-day';
+    day.textContent = isToday ? '今天' : d.day.slice(5);   // MM-DD
+    col.appendChild(num); col.appendChild(track); col.appendChild(day);
+    uvSpark.appendChild(col);
   });
 }
 function setUsagePage(on){
@@ -718,6 +1003,7 @@ function setUsagePage(on){
   bUsage.classList.toggle('on', on);
   document.body.classList.toggle('usage-mode', on);
   if (on && lastState) renderUsageView(lastState.usage);
+  schedulePanelSync();
 }
 function syncAlertsToggle(){
   const on = alertsOn();
@@ -808,11 +1094,18 @@ function renderAlertIndicators(){
 }
 
 // ---- concurrent sessions ----
-// Rows are rebuilt only when a session's identity or state changes; the age text is
-// patched in place afterwards, because an age that ticks every second must not
-// count as a change (it would rebuild the list once a second forever).
-const SESSION_MAX_ROWS = 2;
+// Rows are rebuilt only when a session's identity, state, title or newest message
+// changes; the age text is patched in place afterwards, because an age that ticks
+// every second must not rebuild the list once a second forever.
+//
+// Clicking a row expands a detail card directly below it (still inside the
+// #sessionList column, never over the stage): project/branch/state plus the
+// newest assistant text — "最新对话反馈". Only one card is open at a time, so the
+// panel cannot grow without bound; a second click closes it.
+const SESSION_MAX_ROWS = 3;      // rows shown before "还有 N 个会话"
 let sessionSig = '';
+let openSessionId = null;        // expanded row, or null
+let sessionsAll = false;         // "还有 N 个" expanded to every session
 
 function fmtAge(ms){
   const s = Math.round(ms / 1000);
@@ -821,55 +1114,153 @@ function fmtAge(ms){
   return m < 60 ? m + 'm' : Math.round(m / 60) + 'h';
 }
 function sessionAgeText(s){
-  const tool = (s.state === 'working' && s.tool) ? (TOOL_CN[s.tool] || s.tool) : '';
+  const tool = (s.state === 'working' && s.tool) ? toolLabel(s.tool) : '';
   const st = tool || CN[s.state] || s.state;
   return st + ' · ' + fmtAge(s.ageMs);
 }
+function buildSessionDetail(s){
+  const d = document.createElement('div');
+  d.className = 'sdetail';
+  // The row only has an ellipsised title; the expanded card is where the whole
+  // thing is allowed to wrap.
+  const head = document.createElement('div');
+  head.className = 'sd-title';
+  head.textContent = s.title;
+  d.appendChild(head);
+  const meta = document.createElement('div');
+  meta.className = 'sd-meta';
+  const add = (k, v, age) => {
+    if (!v) return;
+    const kk = document.createElement('span'); kk.className = 'sd-k'; kk.textContent = k;
+    const vv = document.createElement('b'); vv.textContent = v;
+    if (age) vv.dataset.age = '1';
+    meta.appendChild(kk); meta.appendChild(vv);
+  };
+  add('项目', s.project || '—');
+  if (s.branch) add('分支', s.branch);
+  add('状态', sessionAgeText(s), true);
+  d.appendChild(meta);
+
+  const msg = document.createElement('div');
+  msg.className = 'sd-msg';
+  const k = document.createElement('span'); k.className = 'sd-k';
+  const t = document.createElement('span'); t.className = 'sd-t';
+  let text = s.lastText || '';
+  if (text){
+    k.textContent = '最新反馈';
+    t.textContent = text;
+  } else if (s.lastUser){
+    // No reply yet (the turn is still running): the user's last prompt is the
+    // most useful "latest" the transcript has.
+    k.textContent = '最后提问';
+    t.textContent = s.lastUser;
+  } else {
+    k.textContent = '最新反馈';
+    t.textContent = s.state === 'working' ? '正在执行工具，暂无文字反馈' : '暂无文字反馈';
+    msg.classList.add('none');
+  }
+  t.title = text || s.lastUser || '';
+  msg.appendChild(k); msg.appendChild(t);
+  d.appendChild(msg);
+
+  // The row only has room for the short label; the original tool name belongs
+  // in the detail view (and stays out of the row so it cannot overflow).
+  if (s.tool){
+    const raw = document.createElement('div');
+    raw.className = 'sd-raw';
+    raw.textContent = '工具：' + toolTitle(s.tool);
+    d.appendChild(raw);
+  }
+  return d;
+}
+function toggleSession(id){
+  openSessionId = (openSessionId === id) ? null : id;
+  sessionSig = '';                 // force a rebuild with the new open row
+  renderSessions((lastState && lastState.sessions) || []);
+  schedulePanelSync();
+}
+function toggleAllSessions(){
+  sessionsAll = !sessionsAll;
+  sessionSig = '';
+  renderSessions((lastState && lastState.sessions) || []);
+  schedulePanelSync();
+}
 
 function renderSessions(list){
-  const arr = (list || []).slice(0, SESSION_MAX_ROWS);
-  const extra = (list || []).length - arr.length;
-  // A single session is already the headline state above; the list only earns its
-  // space when there is something to compare.
-  if ((list || []).length < 2) {
+  const all = (list || []).filter(Boolean);
+  if ((all || []).length < 2) {
+    openSessionId = null; sessionsAll = false;
     if (sessionSig !== '') { sessionSig = ''; sessionList.innerHTML = ''; }
     return;
   }
-  const sig = arr.map((s) => s.id + '|' + s.state + '|' + s.tool + '|' + s.title).join('~') + '#' + extra;
+  if (openSessionId && !all.some((s) => s.id === openSessionId)) openSessionId = null;
+  // An expanded session must stay on screen even if a newer one pushed it past
+  // the default row limit while the user was reading it.
+  if (!sessionsAll && openSessionId && all.slice(0, SESSION_MAX_ROWS).every((s) => s.id !== openSessionId)) {
+    sessionsAll = true;
+  }
+
+  const limit = sessionsAll ? all.length : SESSION_MAX_ROWS;
+  const arr = all.slice(0, limit);
+  const extra = all.length - arr.length;
+  const sig = arr.map((s) => s.id + '|' + s.state + '|' + s.tool + '|' + s.title + '|' + (s.lastTs || 0)).join('~')
+    + '#' + extra + '#' + (sessionsAll ? 1 : 0) + '#' + (openSessionId || '');
   if (sig === sessionSig) {
-    // same shape: only the ages moved
-    const rows = sessionList.querySelectorAll('.srow');
+    // same shape: only the ages moved. This also keeps the expanded card's
+    // "最新反馈" live when a new message did change lastTs — that changes sig,
+    // so it goes through the rebuild below instead.
+    const rows = sessionList.querySelectorAll('.srow[data-id]');
     arr.forEach((s, i) => {
       const meta = rows[i] && rows[i].querySelector('.smeta');
       if (meta) meta.textContent = sessionAgeText(s);
     });
+    const age = sessionList.querySelector('.sdetail b[data-age]');
+    const open = openSessionId && all.find((x) => x.id === openSessionId);
+    if (age && open) age.textContent = sessionAgeText(open);
     return;
   }
   sessionSig = sig;
-  sessionList.textContent = '';
+  const scrollTop = sessionList.scrollTop;
   const pal = STATE_COLORS[theme] || STATE_COLORS.cyber;
+  sessionList.textContent = '';
   arr.forEach((s) => {
     const row = document.createElement('div');
-    row.className = 'srow';
+    const isOpen = openSessionId === s.id;
+    row.className = 'srow' + (isOpen ? ' open' : '');
+    row.dataset.id = s.id;
+    row.title = s.title + (s.project ? ' · ' + s.project : '') +
+      (s.branch ? ' · ' + s.branch : '') + (s.hooked ? ' · hooks' : '') + ' — 点击查看详情';
     const dot = document.createElement('i');
     dot.className = 'sdot';
     dot.style.background = pal[s.state] || pal.idle;
     const title = document.createElement('span');
     title.className = 'stitle';
     title.textContent = s.title;
-    title.title = (s.project || '') + (s.branch ? ' · ' + s.branch : '') + (s.hooked ? ' · hooks' : '');
     const meta = document.createElement('span');
     meta.className = 'smeta';
     meta.textContent = sessionAgeText(s);
-    row.appendChild(dot); row.appendChild(title); row.appendChild(meta);
+    const chev = document.createElement('span');
+    chev.className = 'schev';
+    chev.textContent = '▸';
+    row.appendChild(dot); row.appendChild(title); row.appendChild(meta); row.appendChild(chev);
+    row.addEventListener('click', () => toggleSession(s.id));
     sessionList.appendChild(row);
+    if (isOpen) sessionList.appendChild(buildSessionDetail(s));
   });
   if (extra > 0) {
     const more = document.createElement('div');
     more.className = 'srow more';
-    more.textContent = '还有 ' + extra + ' 个会话';
+    more.textContent = '还有 ' + extra + ' 个会话 · 点击展开';
+    more.addEventListener('click', toggleAllSessions);
     sessionList.appendChild(more);
+  } else if (sessionsAll && all.length > SESSION_MAX_ROWS) {
+    const less = document.createElement('div');
+    less.className = 'srow more';
+    less.textContent = '收起会话列表';
+    less.addEventListener('click', toggleAllSessions);
+    sessionList.appendChild(less);
   }
+  sessionList.scrollTop = scrollTop;
 }
 
 function ackAlert(a){
@@ -930,7 +1321,9 @@ function pushAlertBubble(a){
     closed = true;
     if (seen) ackAlert(a);
     el.classList.add('out');
-    setTimeout(() => el.remove(), 200);
+    // The panel height was sized around this card; give the space back when it
+    // leaves, even if no state frame happens to arrive at that moment.
+    setTimeout(() => { el.remove(); schedulePanelSync(260); }, 200);
   };
   el.querySelector('.al-x').addEventListener('click', (e) => { e.stopPropagation(); close(true); });
   el.addEventListener('click', () => close(true));
@@ -939,6 +1332,7 @@ function pushAlertBubble(a){
   alertStack.appendChild(el);
   while (alertStack.children.length > ALERT_MAX) alertStack.removeChild(alertStack.firstChild);
   alertBeep(a.level);
+  schedulePanelSync();
 }
 
 function render(json){
@@ -956,6 +1350,7 @@ function render(json){
   renderSessions(json.sessions);
   if (usageOpen) renderUsageView(json.usage);
   firstFrame = false;
+  schedulePanelSync();
 }
 
 function dismiss(){ persistConfig(); callHost('Close'); try { window.close(); } catch(_){} }
@@ -997,6 +1392,8 @@ function api(path){ return fetch(path, {method:'POST'}).catch(()=>{}); }
 // ---- bubbles ----
 const BUBBLES = [
   {act:'theme', label:'主题'},
+  {act:'fs-', label:'A−'},
+  {act:'fs+', label:'A+'},
   {act:'term', label:'终端'},
   {act:'top', label:'置顶'},
   {act:'op+', label:'+透'},
@@ -1011,7 +1408,9 @@ function showBubbles(cx, cy){
     el.className = 'bubble' + (b.bad ? ' bad' : '');
     el.textContent = b.label;
     const ang = (Math.PI*2*i/n) - Math.PI/2;
-    const R = 56;
+    // 64px, not 56: with eight items a 56px radius puts adjacent 46px circles
+    // 43px apart, i.e. overlapping. 64 gives a 49px chord.
+    const R = 64;
     const px = cx + Math.cos(ang)*R, py = cy + Math.sin(ang)*R;
     el.style.left = px + 'px'; el.style.top = py + 'px';
     el.style.transform = 'translate(-50%,-50%) scale(0)';
@@ -1031,6 +1430,8 @@ function hideBubbles(){
 function bubbleAction(act){
   switch (act) {
     case 'theme': cycleTheme(); break;
+    case 'fs-': applyFs(fs - 0.05); persistConfig(); toastMsg('字号 ' + Math.round(fs*100) + '%'); break;
+    case 'fs+': applyFs(fs + 0.05); persistConfig(); toastMsg('字号 ' + Math.round(fs*100) + '%'); break;
     case 'term': api('/api/terminal?act=toggle'); break;
     case 'top': topmost = !topmost; callHost('SetTopMost', topmost); toastMsg(topmost ? '已置顶' : '取消置顶'); break;
     case 'op+': curOpacity = Math.min(100, curOpacity + 15); callHost('SetOpacity', curOpacity); toastMsg('透明度 ' + curOpacity + '%'); break;
@@ -1050,6 +1451,44 @@ const ballDrag = makeDraggable(ball, { skip: isInteractive });
 makeDraggable(document.querySelector('.header'), { skip: isInteractive });
 makeDraggable(document.querySelector('.statebox'), { skip: isInteractive });
 // .header and .statebox get cursor:move from the stylesheet, not from here.
+
+// ---- resize grip (bottom-right corner) ----
+// Grows from the top-left so the corner under the cursor follows the cursor. The
+// regular Resize() stays centre-anchored for the ball<->panel toggle; this one is
+// only used while dragging, and marks the size as user-chosen so syncPanelHeight()
+// never snaps it back (double-click restores auto sizing).
+let gripDrag = null;
+function endGrip(){
+  if (!gripDrag) return;
+  gripDrag = null;
+  document.body.classList.remove('resizing');
+  schedulePanelSync(200);
+}
+gripEl.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault(); e.stopPropagation();
+  gripEl.setPointerCapture(e.pointerId);
+  gripDrag = { x: e.screenX, y: e.screenY, w: panelW, h: panelH };
+  document.body.classList.add('resizing');
+});
+gripEl.addEventListener('pointermove', (e) => {
+  if (!gripDrag) return;
+  const dx = e.screenX - gripDrag.x, dy = e.screenY - gripDrag.y;
+  manualPanel = true;
+  panelW = Math.round(Math.max(PANEL_MIN_W, Math.min(maxPanelW(), gripDrag.w + dx)));
+  panelH = Math.round(Math.max(300, Math.min(maxPanelH(), gripDrag.h + dy)));
+  callHost('ResizeKeepTopLeft', panelW, panelH);
+});
+gripEl.addEventListener('pointerup', endGrip);
+gripEl.addEventListener('pointercancel', endGrip);
+gripEl.addEventListener('dblclick', (e) => {
+  e.stopPropagation();
+  manualPanel = false;
+  panelW = PANEL_W; panelH = PANEL_H;
+  callHost('ResizeKeepTopLeft', panelW, panelH);
+  toastMsg('面板尺寸已复位');
+  schedulePanelSync(220);
+});
 
 ball.addEventListener('click', () => { if (!ballDrag.moved()) setMode('panel'); });
 
@@ -1085,8 +1524,9 @@ alertBadge.addEventListener('click', (e) => { e.stopPropagation(); openAlerts();
 // Same contract on the collapsed ball; here the click also has to open the panel,
 // since a 150px window has nowhere to draw a bubble.
 ballBadge.addEventListener('click', (e) => { e.stopPropagation(); openAlerts(); });
-document.getElementById('uvFsPlus').onclick = () => { applyFs(fs + 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); };
-document.getElementById('uvFsMinus').onclick = () => { applyFs(fs - 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); };
+// Font size now lives in the right-click bubble menu (A− / A+); the +/- keys
+// still work for keyboard users. The old buttons were removed from the usage
+// page so that row could show something about the data instead.
 uvAlerts.onclick = () => {
   const next = !alertsOn();
   uvAlerts.classList.toggle('on', next);
@@ -1110,8 +1550,15 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '+' || e.key === '='){ applyFs(fs + 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); }
   if (e.key === '-' || e.key === '_'){ applyFs(fs - 0.05); persistConfig(); toastMsg('FONT ' + Math.round(fs*100) + '%'); }
 });
-window.addEventListener('beforeunload', persistConfig);
-window.addEventListener('pagehide', persistConfig);
+// Persist prefs and tell the server the window is going away. sendBeacon is the
+// one request a closing page can still make reliably; the server also notices the
+// dropped SSE stream (15s grace), so this is only the fast path.
+function pageGone(){
+  persistConfig();
+  try { if (navigator.sendBeacon) navigator.sendBeacon('/api/exit'); } catch(_){}
+}
+window.addEventListener('beforeunload', pageGone);
+window.addEventListener('pagehide', pageGone);
 
 // ---- boot ----
 (function(){

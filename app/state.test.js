@@ -113,6 +113,20 @@ test('forced state wins over everything except shutdown', () => {
   assert.equal(run([fact({ forced: 'working', shuttingDown: true })]).state, 'offline');
 });
 
+test('an unknown forced state is ignored, not committed', () => {
+  // /api/debug?state=<typo> used to park the pet in a state STATES has never
+  // heard of; the normal facts must decide instead.
+  assert.equal(run([fact({ forced: 'bogus', claudeAlive: false })]).state, 'offline');
+  assert.equal(run([fact({ forced: 'WORKING' })]).state, 'idle');
+  assert.equal(run([fact({ forced: '' })]).state, 'idle');
+});
+
+test('every state name is still accepted as a forced override', () => {
+  for (const s of st.STATES) {
+    assert.equal(run([fact({ forced: s, claudeAlive: false })]).state, s, s + ' should be forced');
+  }
+});
+
 test('computeAlive: no hooks falls back to the process probe', () => {
   assert.equal(st.computeAlive({ now: T0, procAlive: true, hookSessions: [] }), true);
   assert.equal(st.computeAlive({ now: T0, procAlive: false, hookSessions: [] }), false);

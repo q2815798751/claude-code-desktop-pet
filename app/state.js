@@ -74,7 +74,11 @@ function reduce(prev, f, cfg) {
 
   if (f.shuttingDown) { flat(); return commit(m, 'offline', now); }
 
-  if (f.forced) { flat(); return commit(m, f.forced, now); }
+  // `forced` is the debug override, and only a real state name may be committed.
+  // Without the guard a hand-typed /api/debug?state=<junk> parks the pet in a
+  // state that STATES does not contain — no GIF, no palette entry, and the
+  // "every state is in STATES" invariant quietly broken.
+  if (f.forced && STATES.indexOf(f.forced) !== -1) { flat(); return commit(m, f.forced, now); }
 
   // a recent tool failure outranks every working state — but only while claude lives
   if (f.error && f.claudeAlive) { flat(); return commit(m, 'error', now); }

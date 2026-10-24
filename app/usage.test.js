@@ -89,6 +89,29 @@ test('dedup: a duplicate run straddling two scans still counts once', () => {
   assert.equal(ledger.total.in, 1000);
 });
 
+test('parseLine: a zero-token thinking placeholder is skipped', () => {
+  // Claude Code writes the thinking block first with the same message.id and an
+  // all-zero usage object; the block with the real numbers follows. Recording
+  // the placeholder made dedup throw away the real call and pinned context at 0.
+  assert.equal(U.parseLine(line(T0, 'm1', U_(0, 0), 'deepseek/x')), null);
+  assert.ok(U.parseLine(line(T0 + 800, 'm1', U_(624, 410, 0, 178560), 'deepseek/x')));
+});
+
+test('dedup: placeholder + real usage of the same id counts the real one', () => {
+  const { dir, file } = tmpDir();
+  fs.writeFileSync(file, [
+    line(T0, 'm1', U_(0, 0)),
+    line(T0 + 800, 'm1', U_(624, 410, 0, 178560)),
+  ].join('\n') + '\n');
+  const ledger = scan(dir, U.createLedger());
+  assert.equal(ledger.total.msgs, 1);
+  assert.equal(ledger.total.in, 624);
+  assert.equal(ledger.total.out, 410);
+  assert.equal(ledger.total.cr, 178560);
+  assert.equal(ledger.lastTurn.in, 624, 'the last turn must be the real call');
+  assert.equal(ledger.lastBySession['sess-a'].cr, 178560);
+});
+
 test('dedup: distinct messages all count', () => {
   const { dir, file } = tmpDir();
   fs.writeFileSync(file, [
@@ -178,6 +201,63 @@ test('lifecycle: a deleted transcript is dropped from the ledger', () => {
   assert.deepEqual(Object.keys(ledger.files), []);
 });
 
+// ---- a listing that came back empty is not a corpus that was deleted --------
+// listTranscripts() returns [] both when the projects tree is genuinely empty and
+// when readdir threw. Reading that as "every transcript is gone" unwound every
+// rollup (the panel flashed 0) and forced a full re-scan on a transient EACCES /
+// EBUSY / profile switch. Only a file that is provably absent may be dropped.
+
+test('lifecycle: an unreadable projects tree keeps the ledger', () => {
+  const { dir, file } = tmpDir();
+  fs.writeFileSync(file, line(T0, 'm1', U_(100, 10)) + '\n');
+  const ledger = U.createLedger();
+  scan(dir, ledger);
+  assert.equal(ledger.total.in, 100);
+
+  // readdir on a *file* throws (ENOTDIR): the listing comes back empty while the
+  // transcript is still sitting on disk.
+  scan(file, ledger);
+  assert.equal(ledger.total.in, 100, 'a failed listing must not wipe the ledger');
+  assert.ok(ledger.files[file], 'the file entry survives');
+  assert.equal(agg(ledger, 'sess-a').in, 100, 'the session rollup survives too');
+});
+
+test('lifecycle: an empty projects tree keeps the ledger', () => {
+  const { dir, file } = tmpDir();
+  fs.writeFileSync(file, line(T0, 'm1', U_(100, 10)) + '\n');
+  const ledger = U.createLedger();
+  scan(dir, ledger);
+  assert.equal(ledger.total.in, 100);
+
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'pet-u-empty-'));
+  scan(empty, ledger);
+  assert.equal(ledger.total.in, 100, 'an empty tree is not proof of deletion');
+  assert.ok(ledger.files[file]);
+});
+
+test('lifecycle: a file that is provably gone is still dropped from a bad tree', () => {
+  const { dir, file } = tmpDir();
+  fs.writeFileSync(file, line(T0, 'm1', U_(100, 10)) + '\n');
+  const ledger = U.createLedger();
+  scan(dir, ledger);
+  assert.equal(ledger.total.in, 100);
+
+  // Both signals at once: the tree cannot be listed AND the file is really gone.
+  fs.unlinkSync(file);
+  scan(file, ledger);
+  assert.equal(ledger.total.in, 0, 'a definite ENOENT still drops the file');
+  assert.deepEqual(Object.keys(ledger.files), []);
+});
+
+test('goneFromDisk: only a definite ENOENT counts as gone', () => {
+  const { dir, file } = tmpDir();
+  fs.writeFileSync(file, 'x');
+  assert.equal(U.goneFromDisk(file), false);
+  assert.equal(U.goneFromDisk(path.join(dir, 'nope.jsonl')), true);
+  // A directory that exists is not gone, even though it is not a transcript.
+  assert.equal(U.goneFromDisk(dir), false);
+});
+
 test('scanner: a tiny budget still finishes, one slice at a time', () => {
   const { dir, file } = tmpDir();
   const rows = [];
@@ -234,6 +314,23 @@ test('snapshot: the context reading is the last turn, not a running total', () =
   assert.equal(s.ctx.pct, 2);
   assert.equal(s.total.in, 110);
   assert.equal(s.session.msgs, 2);
+});
+
+test('snapshot: context follows the SELECTED session, not the newest file', () => {
+  const { dir, file } = tmpDir();
+  const other = path.join(path.dirname(file), 'sess-b.jsonl');
+  // sess-b is written later and has a huge turn; sess-a stays small.
+  fs.writeFileSync(file, line(T0, 'a1', U_(100, 10)) + '\n');
+  fs.writeFileSync(other, line(T0 + 5000, 'b1', U_(9000, 100, 0, 80000)) + '\n');
+  const ledger = scan(dir, U.createLedger());
+
+  const a = U.snapshot(ledger, { session: 'sess-a', now: T0 + 6000, ready: true });
+  assert.equal(a.ctx.tokens, 110, 'sess-a context must be its own last turn');
+  const b = U.snapshot(ledger, { session: 'sess-b', now: T0 + 6000, ready: true });
+  assert.equal(b.ctx.tokens, 89100);
+  // Unknown/new session must not borrow another conversation's context.
+  const c = U.snapshot(ledger, { session: 'sess-new', now: T0 + 6000, ready: true });
+  assert.equal(c.ctx.tokens, 0);
 });
 
 // A configured window smaller than reality (proxy models, a wrong setting) must
